@@ -12,6 +12,7 @@ import { renderDiff as renderDiffColored } from "../modes/components/diff";
 import { getLanguageFromPath, type Theme } from "../modes/theme/theme";
 import type { OutputMeta } from "../tools/output-meta";
 import {
+	extractPartialJsonString,
 	formatDiagnostics,
 	formatDiffStats,
 	formatExpandHint,
@@ -146,28 +147,6 @@ const CALL_TEXT_PREVIEW_WIDTH = 80;
 /** Extract file path from an edit entry. */
 function filePathFromEditEntry(p: string | undefined): string | undefined {
 	return p ?? undefined;
-}
-
-function decodePartialJsonStringFragment(fragment: string): string {
-	// Trim a trailing partial escape so JSON.parse sees a well-formed string.
-	let text = fragment.replace(/\\u[0-9a-fA-F]{0,3}$/, "");
-	const trailingBackslashes = text.match(/\\+$/)?.[0].length ?? 0;
-	if (trailingBackslashes % 2 === 1) text = text.slice(0, -1);
-	try {
-		return JSON.parse(`"${text}"`) as string;
-	} catch {
-		// Streaming fragment isn't a valid JSON string yet; surface it raw rather
-		// than ad-hoc unescaping that mishandles surrogates and partial escapes.
-		return text;
-	}
-}
-
-function extractPartialJsonString(partialJson: string | undefined, key: string): string | undefined {
-	if (!partialJson) return undefined;
-	const pattern = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)`, "u");
-	const match = pattern.exec(partialJson);
-	if (!match) return undefined;
-	return decodePartialJsonStringFragment(match[1]);
 }
 
 function getPartialJsonEditPath(args: EditRenderArgs): string | undefined {

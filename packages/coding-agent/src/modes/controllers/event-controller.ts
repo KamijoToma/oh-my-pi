@@ -341,21 +341,29 @@ export class EventController {
 
 			for (const content of this.ctx.streamingMessage.content) {
 				if (content.type !== "toolCall") continue;
+				// Preserve the raw partial JSON for renderers that need to surface fields before
+				// the JSON object closes. Bash uses this to show inline env assignments during
+				// streaming, and write/read/edit use it to surface the file path while a slow
+				// provider's small deltas keep the throttled structured args empty.
+				const renderArgs =
+					"partialJson" in content
+						? { ...content.arguments, __partialJson: content.partialJson }
+						: content.arguments;
 				if (content.name === "read") {
-					if (!readArgsHaveTarget(content.arguments)) {
+					if (!readArgsHaveTarget(renderArgs)) {
 						// Args still streaming — defer until path is parseable so we can route to the
 						// read group (regular files) vs ToolExecutionComponent (internal URLs).
 						// Creating either component now would lock the read into the wrong shape.
 						continue;
 					}
-					if (!readArgsTargetInternalUrl(content.arguments)) {
-						this.#trackReadToolCall(content.id, content.arguments);
+					if (!readArgsTargetInternalUrl(renderArgs)) {
+						this.#trackReadToolCall(content.id, renderArgs);
 						const component = this.ctx.pendingTools.get(content.id);
 						if (component) {
-							component.updateArgs(content.arguments, content.id);
+							component.updateArgs(renderArgs, content.id);
 						} else {
 							const group = this.#getReadGroup();
-							group.updateArgs(content.arguments, content.id);
+							group.updateArgs(renderArgs, content.id);
 							this.ctx.pendingTools.set(content.id, group);
 						}
 						continue;
@@ -363,12 +371,6 @@ export class EventController {
 					// Internal URL read falls through to ToolExecutionComponent below.
 				}
 
-				// Preserve the raw partial JSON for renderers that need to surface fields before the JSON object closes.
-				// Bash uses this to show inline env assignments during streaming instead of popping them in at completion.
-				const renderArgs =
-					"partialJson" in content
-						? { ...content.arguments, __partialJson: content.partialJson }
-						: content.arguments;
 				if (!this.ctx.pendingTools.has(content.id)) {
 					this.#resetReadGroup();
 					this.ctx.chatContainer.addChild(new Text("", 0, 0));

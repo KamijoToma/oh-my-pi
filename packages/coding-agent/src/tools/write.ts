@@ -36,6 +36,7 @@ import { type OutputMeta, outputMeta } from "./output-meta";
 import { formatPathRelativeToCwd, isInternalUrlPath } from "./path-utils";
 import { enforcePlanModeWrite, resolvePlanPath } from "./plan-mode-guard";
 import {
+	extractPartialJsonFilePath,
 	formatDiagnostics,
 	formatExpandHint,
 	formatMoreItems,
@@ -898,6 +899,13 @@ interface WriteRenderArgs {
 	path?: string;
 	file_path?: string;
 	content?: string;
+	/**
+	 * Raw in-flight `partialJson` buffer forwarded by `event-controller.ts`
+	 * so the renderer can surface the `path` field before the throttled
+	 * structured `arguments` parse catches up on slow providers. See
+	 * {@link extractPartialJsonFilePath}.
+	 */
+	__partialJson?: string;
 }
 
 const WRITE_PREVIEW_LINES = 6;
@@ -973,7 +981,7 @@ function renderContentPreview(
 
 export const writeToolRenderer = {
 	renderCall(args: WriteRenderArgs, options: RenderResultOptions, uiTheme: Theme): Component {
-		const rawPath = args.file_path || args.path || "";
+		const rawPath = args.file_path || args.path || extractPartialJsonFilePath(args) || "";
 		const filePath = shortenPath(rawPath);
 		const lang = getLanguageFromPath(rawPath) ?? "text";
 		const langIcon = uiTheme.fg("muted", uiTheme.getLangIcon(lang));

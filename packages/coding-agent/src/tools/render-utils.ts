@@ -788,3 +788,57 @@ export function getLspBatchRequest(toolCall: ToolCallContext | undefined): LspBa
 	const hasLaterWrites = toolCall.toolCalls.slice(toolCall.index + 1).some(call => LSP_BATCH_TOOLS.has(call.name));
 	return { id: toolCall.batchId, flush: !hasLaterWrites };
 }
+
+// =============================================================================
+// Streaming Partial-JSON Helpers
+// =============================================================================
+
+/**
+ * Decode a JSON-string fragment that may have been cut mid-escape during
+ * streaming. Trims trailing partial `\uXXXX` and orphaned `\` so {@link JSON.parse}
+ * sees a well-formed string; falls back to the raw text if parsing still fails.
+ */
+export function decodePartialJsonStringFragment(fragment: string): string {
+	let text = fragment.replace(/\\u[0-9a-fA-F]{0,3}$/, "");
+	const trailingBackslashes = text.match(/\\+$/)?.[0].length ?? 0;
+	if (trailingBackslashes % 2 === 1) text = text.slice(0, -1);
+	try {
+		return JSON.parse(`"${text}"`) as string;
+	} catch {
+		// Streaming fragment isn't a valid JSON string yet; surface it raw rather
+		// than ad-hoc unescaping that mishandles surrogates and partial escapes.
+		return text;
+	}
+}
+
+/**
+ * Pull the value of a top-level string-typed JSON field out of an in-flight
+ * `partialJson` buffer (e.g. the `path` field of a tool-call argument blob)
+ * before the structured `arguments` parse has caught up. Returns `undefined`
+ * when the field is absent or its opening `"` has not arrived yet.
+ *
+ * Used by tool renderers (write, read, edit) to show file paths during
+ * streaming on providers that emit small deltas, where
+ * `parseStreamingJsonThrottled` blocks every mid-stream parse until the
+ * accumulated buffer grows ≥256 bytes — small write/read payloads finish
+ * below that threshold and only land in `content.arguments` at `toolcall_end`.
+ */
+export function extractPartialJsonString(partialJson: string | undefined, key: string): string | undefined {
+	if (!partialJson) return undefined;
+	const pattern = new RegExp(`"${key}"\\s*:\\s*"((?:\\\\.|[^"\\\\])*)`, "u");
+	const match = pattern.exec(partialJson);
+	if (!match) return undefined;
+	return decodePartialJsonStringFragment(match[1]);
+}
+
+/**
+ * Read a `path` (or legacy `file_path`) string out of `__partialJson` for
+ * renderers that take a `{ path?, file_path?, __partialJson? }` arg shape.
+ * Returns the first key with a recoverable value so callers can use it as the
+ * tail of a `args.file_path || args.path || extractPartialJsonFilePath(args)` chain.
+ */
+export function extractPartialJsonFilePath(args: { __partialJson?: string }): string | undefined {
+	const partial = args.__partialJson;
+	if (!partial) return undefined;
+	return extractPartialJsonString(partial, "path") ?? extractPartialJsonString(partial, "file_path");
+}

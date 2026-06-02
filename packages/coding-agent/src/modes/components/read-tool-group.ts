@@ -3,7 +3,7 @@ import { Container, Text } from "@oh-my-pi/pi-tui";
 import { InternalUrlRouter } from "../../internal-urls";
 import { getLanguageFromPath, theme } from "../../modes/theme/theme";
 import { splitPathAndSel } from "../../tools/path-utils";
-import { PREVIEW_LIMITS, shortenPath } from "../../tools/render-utils";
+import { extractPartialJsonString, PREVIEW_LIMITS, shortenPath } from "../../tools/render-utils";
 import { renderCodeCell } from "../../tui";
 import type { ToolExecutionHandle } from "./tool-execution";
 
@@ -16,11 +16,19 @@ import type { ToolExecutionHandle } from "./tool-execution";
 function readArgsTarget(args: unknown): string | undefined {
 	if (!args || typeof args !== "object" || Array.isArray(args)) return undefined;
 	const record = args as Record<string, unknown>;
-	return typeof record.path === "string"
-		? record.path
-		: typeof record.file_path === "string"
-			? record.file_path
-			: undefined;
+	if (typeof record.path === "string") return record.path;
+	if (typeof record.file_path === "string") return record.file_path;
+	// Streaming fallback: `event-controller.ts` forwards the raw partialJson
+	// buffer on the args so we can route the read (filesystem vs internal URL)
+	// before the throttled structured `arguments` parse catches up on providers
+	// that stream small tool-call deltas.
+	if (typeof record.__partialJson === "string") {
+		return (
+			extractPartialJsonString(record.__partialJson, "path") ??
+			extractPartialJsonString(record.__partialJson, "file_path")
+		);
+	}
+	return undefined;
 }
 
 export function readArgsHaveTarget(args: unknown): boolean {
@@ -38,6 +46,7 @@ type ReadRenderArgs = {
 	file_path?: string;
 	// Legacy field from the old schema; tolerated for rebuilt transcripts.
 	sel?: string;
+	__partialJson?: string;
 };
 
 type ReadToolSuffixResolution = {
@@ -92,7 +101,14 @@ export class ReadToolGroupComponent extends Container implements ToolExecutionHa
 
 	updateArgs(args: ReadRenderArgs, toolCallId?: string): void {
 		if (!toolCallId) return;
-		const basePath = args.file_path || args.path || "";
+		const basePath =
+			args.file_path ||
+			args.path ||
+			(args.__partialJson
+				? (extractPartialJsonString(args.__partialJson, "path") ??
+					extractPartialJsonString(args.__partialJson, "file_path") ??
+					"")
+				: "");
 		const rawPath = args.sel ? `${basePath}:${args.sel}` : basePath;
 		const entry: ReadEntry = this.#entries.get(toolCallId) ?? {
 			toolCallId,

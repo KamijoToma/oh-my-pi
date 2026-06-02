@@ -73,7 +73,7 @@ import {
 	splitInternalUrlSel,
 	splitPathAndSel,
 } from "./path-utils";
-import { formatBytes, replaceTabs, shortenPath, wrapBrackets } from "./render-utils";
+import { extractPartialJsonFilePath, formatBytes, replaceTabs, shortenPath, wrapBrackets } from "./render-utils";
 import {
 	executeReadQuery,
 	getRowByKey,
@@ -2314,15 +2314,26 @@ interface ReadRenderArgs {
 	offset?: number;
 	limit?: number;
 	raw?: boolean;
+	/**
+	 * Raw in-flight `partialJson` buffer forwarded by `event-controller.ts`
+	 * so the renderer can surface the `path` field before the throttled
+	 * structured `arguments` parse catches up on slow providers. See
+	 * {@link extractPartialJsonFilePath}.
+	 */
+	__partialJson?: string;
 }
 
 export const readToolRenderer = {
 	renderCall(args: ReadRenderArgs, _options: RenderResultOptions, uiTheme: Theme): Component {
-		if (isReadableUrlPath(args.file_path || args.path || "")) {
-			return renderReadUrlCall(args, _options, uiTheme);
+		const targetPath = args.file_path || args.path || extractPartialJsonFilePath(args) || "";
+		if (isReadableUrlPath(targetPath)) {
+			// Resolve the URL on the args object so `renderReadUrlCall` sees it even
+			// when only `__partialJson` carries the path during streaming.
+			const urlArgs = args.path || args.file_path ? args : { ...args, path: targetPath };
+			return renderReadUrlCall(urlArgs, _options, uiTheme);
 		}
 
-		const rawPath = args.file_path || args.path || "";
+		const rawPath = targetPath;
 		const shortPath = shortenPath(rawPath);
 		const linkTarget = tryResolveInternalUrlSync(rawPath);
 		const filePath = linkTarget ? fileHyperlink(linkTarget, shortPath) : shortPath;

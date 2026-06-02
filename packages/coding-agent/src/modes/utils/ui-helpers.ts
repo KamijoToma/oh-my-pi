@@ -339,10 +339,17 @@ export class UiHelpers {
 						continue;
 					}
 
+					// Hoist renderArgs so the read-tool gating sees `__partialJson` too.
+					// Without this, transcripts rebuilt mid-stream skip the read group
+					// when only `__partialJson` carries the path (slow-provider deltas).
+					const renderArgs =
+						"partialJson" in content
+							? { ...content.arguments, __partialJson: content.partialJson }
+							: content.arguments;
 					if (
 						content.name === "read" &&
-						readArgsHaveTarget(content.arguments) &&
-						!readArgsTargetInternalUrl(content.arguments)
+						readArgsHaveTarget(renderArgs) &&
+						!readArgsTargetInternalUrl(renderArgs)
 					) {
 						if (hasErrorStop && errorMessage) {
 							if (!readGroup) {
@@ -352,7 +359,7 @@ export class UiHelpers {
 								readGroup.setExpanded(this.ctx.toolOutputExpanded);
 								this.ctx.chatContainer.addChild(readGroup);
 							}
-							readGroup.updateArgs(content.arguments, content.id);
+							readGroup.updateArgs(renderArgs, content.id);
 							readGroup.updateResult(
 								{ content: [{ type: "text", text: errorMessage }], isError: true },
 								false,
@@ -360,8 +367,8 @@ export class UiHelpers {
 							);
 						} else {
 							const normalizedArgs =
-								content.arguments && typeof content.arguments === "object" && !Array.isArray(content.arguments)
-									? (content.arguments as Record<string, unknown>)
+								renderArgs && typeof renderArgs === "object" && !Array.isArray(renderArgs)
+									? (renderArgs as Record<string, unknown>)
 									: {};
 							readToolCallArgs.set(content.id, normalizedArgs);
 							if (assistantComponent) {
@@ -373,10 +380,6 @@ export class UiHelpers {
 
 					readGroup = null;
 					const tool = this.ctx.session.getToolByName(content.name);
-					const renderArgs =
-						"partialJson" in content
-							? { ...content.arguments, __partialJson: content.partialJson }
-							: content.arguments;
 					const component = new ToolExecutionComponent(
 						content.name,
 						renderArgs,

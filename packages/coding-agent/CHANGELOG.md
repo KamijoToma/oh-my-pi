@@ -10,6 +10,7 @@
 
 - Fixed `/review`'s uncommitted-change mode in Jujutsu repositories to read `jj diff --git` from the current workspace, so non-default JJ workspaces include their working-copy changes instead of falling back to the colocated Git checkout.
 - Fixed empty assistant stop retry continuations preserving auto-retry state until a non-empty assistant turn completes or recovery reaches its retry cap.
+- Fixed the `write` and `read` tool-call headers showing `…` instead of the target path during streaming on providers that emit small tool-call deltas (open-source, Chinese providers, local Ollama). `extractPartialJsonString` / `decodePartialJsonStringFragment` are now shared via `tools/render-utils.ts`, the write/read renderers fall back to the raw `__partialJson` buffer when the throttled structured `arguments` parse has not caught up, and the read-tool routing in `event-controller.ts` / `ui-helpers.ts` peeks `__partialJson` so the read group is created (and routed to URL vs filesystem) before the full JSON object closes ([#1738](https://github.com/can1357/oh-my-pi/issues/1738)).
 
 ### Changed
 
