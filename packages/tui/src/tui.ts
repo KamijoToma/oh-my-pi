@@ -6,7 +6,7 @@ import * as path from "node:path";
 import { performance } from "node:perf_hooks";
 import { $flag, getDebugLogPath } from "@oh-my-pi/pi-utils";
 import { isKeyRelease, matchesKey } from "./keys";
-import type { Terminal } from "./terminal";
+import { type Terminal, terminalResetsViewportOnEraseScrollback } from "./terminal";
 import { ImageProtocol, setCellDimensions, setTerminalImageProtocol, TERMINAL } from "./terminal-capabilities";
 import {
 	Ellipsis,
@@ -388,7 +388,11 @@ export class TUI extends Container {
 	 * is actively re-rendering — e.g. a tool whose result is still streaming and
 	 * re-laying-out rows that have already scrolled into history. A snap to the tail
 	 * is acceptable there. A terminal that can report a *known*-scrolled viewport
-	 * (Windows) still defers; only the unknown case is forced to rebuild.
+	 * (Windows) still defers; only the unknown case is forced to rebuild. POSIX
+	 * hosts whose terminal is known to reset the viewport on ED3 (WezTerm,
+	 * kitty, ghostty, alacritty — see #1682) also defer, since the destructive
+	 * `\x1b[3J` would yank a scrolled-up reader; the deferred rebuild lands at
+	 * the next checkpoint where input has pinned the viewport to the bottom.
 	 */
 	setEagerNativeScrollbackRebuild(enabled: boolean): void {
 		this.#eagerNativeScrollbackRebuild = enabled;
@@ -1180,8 +1184,18 @@ export class TUI extends Container {
 		const prevHardwareCursorRow = this.#hardwareCursorRow;
 		const widthChanged = this.#previousWidth > 0 && this.#previousWidth !== width;
 		const heightChanged = this.#previousHeight > 0 && this.#previousHeight !== height;
-		const allowUnknownViewportMutation =
-			this.#allowUnknownViewportMutationOnNextRender || this.#eagerNativeScrollbackRebuild;
+		// `setEagerNativeScrollbackRebuild(true)` (coding-agent enables it for the
+		// full duration of every streaming event) normally lets unknown-viewport
+		// frames take the destructive `historyRebuild` path so re-laying-out
+		// streamed output produces a clean, duplicate-free history. On terminals
+		// that reset the viewport to the top of scrollback on ED3 (WezTerm,
+		// kitty, ghostty, alacritty — see #1682) that snap-to-tail yanks any
+		// scrolled-up reader. Defer to the non-destructive viewport repaint
+		// there; the explicit autocomplete/IME opt-in via `requestRender(...,
+		// { allowUnknownViewportMutation: true })` still flows through because
+		// the user's keystroke has pinned the terminal back to the bottom.
+		const eagerRebuildAllowed = this.#eagerNativeScrollbackRebuild && !terminalResetsViewportOnEraseScrollback();
+		const allowUnknownViewportMutation = this.#allowUnknownViewportMutationOnNextRender || eagerRebuildAllowed;
 		this.#allowUnknownViewportMutationOnNextRender = false;
 
 		// 3. Classify intent.

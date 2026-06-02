@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Fixed
+
+- Fixed scrolled-up readers being yanked to the top of scrollback during streaming on POSIX terminals that reset the viewport on ED3 (WezTerm, kitty, ghostty, alacritty). `TUI.setEagerNativeScrollbackRebuild(true)` — which the coding agent enables for the full duration of every streaming event — promoted the eager opt-in into `allowUnknownViewportMutation`, bypassing the 15.7.3 unknown-viewport deferral and routing offscreen structural mutations through `historyRebuild` → `\x1b[2J\x1b[H\x1b[3J`. These terminals honor ECMA-48 ED3 by repositioning the viewport to the top of the (now-erased) scrollback, so the rebuild yanked the reader. The eager flag now defers on those hosts (detected via `WEZTERM_PANE` / `KITTY_WINDOW_ID` / `GHOSTTY_RESOURCES_DIR` / `ALACRITTY_WINDOW_ID` or `TERM_PROGRAM`); the destructive rebuild lands at the next checkpoint (`refreshNativeScrollbackIfDirty` on prompt submit) where the user's keystroke has pinned the viewport back to the bottom. Autocomplete/IME paths that opt in via `requestRender(..., { allowUnknownViewportMutation: true })` are unaffected. Other POSIX terminals keep the eager rebuild. ([#1682](https://github.com/can1357/oh-my-pi/issues/1682))
+
 ## [15.7.6] - 2026-06-01
 
 ### Fixed
