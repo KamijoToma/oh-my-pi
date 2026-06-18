@@ -22,7 +22,6 @@ import {
 	type AuthCredential,
 	AuthStorage,
 	type CredentialDisabledEvent,
-	DEFAULT_AUTH_BROKER_BIND,
 	type FetchImpl,
 	getEnvApiKey,
 	getOAuthProviders,
