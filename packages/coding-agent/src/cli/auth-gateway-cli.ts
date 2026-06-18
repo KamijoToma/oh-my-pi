@@ -74,6 +74,8 @@ function getTokenFilePath(): string {
 	return path.join(getConfigRootDir(), "auth-gateway.token");
 }
 
+const DEFAULT_GATEWAY_CATALOG_POLL_INTERVAL_MS = 60_000;
+
 async function readToken(): Promise<string | null> {
 	try {
 		const raw = await Bun.file(getTokenFilePath()).text();
@@ -343,6 +345,41 @@ function resolveCatalogCacheTtlMs(): number {
 	return DEFAULT_CATALOG_CACHE_TTL_MS;
 }
 
+function resolveGatewayCatalogPollIntervalMs(): number {
+	const raw = process.env.OMP_AUTH_BROKER_CATALOG_POLL_INTERVAL_MS;
+	if (raw === undefined) return DEFAULT_GATEWAY_CATALOG_POLL_INTERVAL_MS;
+	const value = raw.trim();
+	if (value === "") return DEFAULT_GATEWAY_CATALOG_POLL_INTERVAL_MS;
+	const intervalMs = Number(value);
+	if (Number.isFinite(intervalMs) && intervalMs >= 0) return intervalMs;
+	logger.warn("Invalid OMP_AUTH_BROKER_CATALOG_POLL_INTERVAL_MS; using default", { value: raw });
+	return DEFAULT_GATEWAY_CATALOG_POLL_INTERVAL_MS;
+}
+
+export interface GatewayCatalogPollingOptions {
+	intervalMs: number;
+	refresh: () => Promise<void>;
+}
+
+export function startGatewayCatalogPolling(opts: GatewayCatalogPollingOptions): (() => void) | undefined {
+	if (opts.intervalMs <= 0) return undefined;
+	let refreshing = false;
+	const timer: NodeJS.Timeout = setInterval(() => {
+		if (refreshing) return;
+		refreshing = true;
+		opts
+			.refresh()
+			.catch(error => {
+				logger.warn("auth-gateway catalog poll refresh failed", { error: String(error) });
+			})
+			.finally(() => {
+				refreshing = false;
+			});
+	}, opts.intervalMs);
+	timer.unref?.();
+	return () => clearInterval(timer);
+}
+
 async function fetchBrokerCatalogWithCache(
 	client: AuthBrokerClient,
 	brokerConfig: AuthBrokerClientConfig,
@@ -410,6 +447,11 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	let currentCatalog = await fetchBrokerCatalogIfEnabled(client, brokerConfig, catalogCachePath, catalogConfig);
 	let modelIndex = buildGatewayModelIndex(initialSnapshot, currentCatalog, catalogConfig);
 	let store: RemoteAuthCredentialStore;
+	const refreshCatalog = async (): Promise<void> => {
+		if (!catalogConfig.enabled) return;
+		currentCatalog = await fetchBrokerCatalogWithCache(client, brokerConfig, catalogCachePath);
+		modelIndex = buildGatewayModelIndex(store.snapshot, currentCatalog, catalogConfig);
+	};
 	store = new RemoteAuthCredentialStore({
 		client,
 		initialSnapshot,
@@ -417,17 +459,14 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 			modelIndex = buildGatewayModelIndex(snapshot, currentCatalog, catalogConfig);
 		},
 		onCatalogChanged: () => {
-			if (!catalogConfig.enabled) return;
-			void (async () => {
-				try {
-					currentCatalog = await fetchBrokerCatalogWithCache(client, brokerConfig, catalogCachePath);
-					modelIndex = buildGatewayModelIndex(store.snapshot, currentCatalog, catalogConfig);
-				} catch (error) {
-					logger.warn("auth-gateway catalog refresh failed", { error: String(error) });
-				}
-			})();
+			void refreshCatalog().catch(error => {
+				logger.warn("auth-gateway catalog refresh failed", { error: String(error) });
+			});
 		},
 	});
+	const stopCatalogPolling = catalogConfig.enabled
+		? startGatewayCatalogPolling({ intervalMs: resolveGatewayCatalogPollIntervalMs(), refresh: refreshCatalog })
+		: undefined;
 	// Refresh + usage both flow through the store's broker hooks automatically —
 	// `RemoteAuthCredentialStore.refreshOAuthCredential` and `.fetchUsageReports`.
 	// AuthStorage discovers them when no explicit option overrides them, so the
@@ -461,6 +500,7 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 		process.stdout.write(`\nReceived ${signal}, shutting down...\n`);
 		let closeError: unknown;
 		try {
+			stopCatalogPolling?.();
 			await handle.close();
 		} catch (error) {
 			closeError = error;

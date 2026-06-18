@@ -1,6 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test, vi } from "bun:test";
 import type { ModelsConfigResponse, SnapshotResponse } from "@oh-my-pi/pi-ai";
-import { buildGatewayModelIndex, isGatewayCatalogBaseUrlAllowed } from "@oh-my-pi/pi-coding-agent/cli/auth-gateway-cli";
+import {
+	buildGatewayModelIndex,
+	isGatewayCatalogBaseUrlAllowed,
+	startGatewayCatalogPolling,
+} from "@oh-my-pi/pi-coding-agent/cli/auth-gateway-cli";
 
 const REFRESHER = {
 	enabled: false,
@@ -31,6 +35,12 @@ function catalog(providers: ModelsConfigResponse["providers"]): ModelsConfigResp
 		schemaVersion: 1,
 		providers,
 	};
+}
+
+async function flushMicrotasks(): Promise<void> {
+	await Promise.resolve();
+	await Promise.resolve();
+	await Promise.resolve();
 }
 
 describe("auth-gateway broker-served catalog", () => {
@@ -139,5 +149,63 @@ describe("auth-gateway broker-served catalog", () => {
 		expect(isGatewayCatalogBaseUrlAllowed("https://api.example.com:8443/v1", ["https://api.example.com/v1"])).toBe(
 			false,
 		);
+	});
+});
+
+describe("auth-gateway catalog polling", () => {
+	afterEach(() => {
+		vi.useRealTimers();
+		vi.restoreAllMocks();
+	});
+
+	test("refreshes the broker catalog on the configured interval", async () => {
+		vi.useFakeTimers();
+		let refreshes = 0;
+		const stop = startGatewayCatalogPolling({
+			intervalMs: 1000,
+			refresh: async () => {
+				refreshes += 1;
+			},
+		});
+		try {
+			expect(refreshes).toBe(0);
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(refreshes).toBe(1);
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(refreshes).toBe(2);
+		} finally {
+			stop?.();
+		}
+	});
+
+	test("skips overlapping catalog refreshes", async () => {
+		vi.useFakeTimers();
+		const pending = Promise.withResolvers<void>();
+		let refreshes = 0;
+		const stop = startGatewayCatalogPolling({
+			intervalMs: 1000,
+			refresh: async () => {
+				refreshes += 1;
+				await pending.promise;
+			},
+		});
+		try {
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(refreshes).toBe(1);
+			vi.advanceTimersByTime(3000);
+			await flushMicrotasks();
+			expect(refreshes).toBe(1);
+			pending.resolve();
+			await flushMicrotasks();
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(refreshes).toBe(2);
+		} finally {
+			pending.resolve();
+			stop?.();
+		}
 	});
 });

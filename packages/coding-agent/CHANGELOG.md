@@ -99,6 +99,7 @@
 - Added `omp auth-broker serve --dangerously-allow-local-raw-keys` for local-only ingestion of literal shared-catalog API keys while still serving sanitized catalogs.
 - Added broker-side discovery materialization for shared catalogs so discovery-only `models-shared.yml` providers are served with concrete models.
 - Added `omp auth-broker serve --catalog-refresh-interval-ms` to periodically reload and rediscover broker-served shared catalogs.
+- Added gateway catalog polling fallback so broker-served catalog updates still refresh when snapshot SSE is unavailable.
 
 ## [16.0.5] - 2026-06-17
 
