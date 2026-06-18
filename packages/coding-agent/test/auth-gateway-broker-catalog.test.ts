@@ -95,6 +95,38 @@ describe("auth-gateway broker-served catalog", () => {
 		expect((model?.compatConfig as { disableStrictTools?: boolean } | undefined)?.disableStrictTools).toBe(true);
 	});
 
+	test("catalog replacements update bare aliases for bundled models", () => {
+		const index = buildGatewayModelIndex(
+			snapshot(["openai"]),
+			catalog({
+				openai: {
+					baseUrl: "https://shared-openai.example/v1",
+					api: "openai-completions",
+					models: [{ id: "gpt-4o", headers: { "X-Shared": "1" } }],
+				},
+			}),
+			{ enabled: true, allowedBaseUrls: [] },
+		);
+
+		expect(index.byId.get("gpt-4o")?.baseUrl).toBe("https://shared-openai.example/v1");
+		expect(index.byId.get("gpt-4o")?.headers?.["X-Shared"]).toBe("1");
+	});
+
+	test("allows providers that only define model-level baseUrls", () => {
+		const index = buildGatewayModelIndex(
+			snapshot(["acme"]),
+			catalog({
+				acme: {
+					api: "openai-completions",
+					models: [{ id: "east", baseUrl: "https://east.acme.example/v1" }],
+				},
+			}),
+			{ enabled: true, allowedBaseUrls: [] },
+		);
+
+		expect(index.byId.get("acme/east")?.baseUrl).toBe("https://east.acme.example/v1");
+	});
+
 	test("ignores catalog models when disabled or baseUrl is outside the allowlist", () => {
 		const response = catalog({
 			acme: {

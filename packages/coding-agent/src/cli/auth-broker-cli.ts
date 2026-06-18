@@ -445,17 +445,9 @@ export async function loadSharedBrokerCatalog(
 		const resolved = resolveSharedApiKey(providerConfig.apiKey, opts);
 		if (!resolved) throw new Error(`Unable to resolve apiKey for shared provider ${provider}`);
 		resolvedApiKeys.set(provider, resolved);
-		const previousIds = previousBrokerOwnedCredentials.get(provider);
-		const existingIds = new Set(
-			storage
-				.listStoredCredentials(provider)
-				.filter(entry => entry.credential.type === "api_key" && entry.credential.key === resolved)
-				.map(entry => entry.id),
-		);
 		const entries = storage.upsertCredential(provider, { type: "api_key", key: resolved });
 		const brokerOwnedIds = entries
 			.filter(entry => entry.credential.type === "api_key" && entry.credential.key === resolved)
-			.filter(entry => previousIds?.has(entry.id) || !existingIds.has(entry.id))
 			.map(entry => entry.id);
 		brokerOwnedCredentials.set(provider, new Set(brokerOwnedIds));
 	}

@@ -533,7 +533,7 @@ describe("auth-broker shared catalog", () => {
 		}
 	});
 
-	test("loadSharedBrokerCatalog does not claim pre-existing matching API keys", async () => {
+	test("loadSharedBrokerCatalog reclaims matching shared API keys after broker restart", async () => {
 		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
 		const storage = new AuthStorage(store);
 		await storage.reload();
@@ -557,12 +557,12 @@ describe("auth-broker shared catalog", () => {
 		try {
 			const first = await loadSharedBrokerCatalog(firstFile, storage);
 			expect(storage.listStoredCredentials("acme")).toHaveLength(1);
+			expect(first?.brokerOwnedCredentials.get("acme")?.size).toBe(1);
 
 			await loadSharedBrokerCatalog(secondFile, storage, first?.brokerOwnedCredentials);
 
 			const remaining = storage.listStoredCredentials("acme");
-			expect(remaining).toHaveLength(1);
-			expect(remaining[0].credential).toEqual({ type: "api_key", key: "resolved-broker-key" });
+			expect(remaining).toHaveLength(0);
 		} finally {
 			storage.close();
 			store.close();

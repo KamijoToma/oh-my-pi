@@ -166,8 +166,10 @@ function addGatewayModel(
 	bareModels: Map<string, GatewayCatalogModel>,
 	model: GatewayCatalogModel,
 ): void {
-	qualifiedModels.set(`${model.provider}/${model.id}`, model);
-	if (!bareModels.has(model.id)) bareModels.set(model.id, model);
+	const key = `${model.provider}/${model.id}`;
+	const replacesExistingQualified = qualifiedModels.has(key);
+	qualifiedModels.set(key, model);
+	if (replacesExistingQualified || !bareModels.has(model.id)) bareModels.set(model.id, model);
 }
 
 export function isGatewayCatalogBaseUrlAllowed(baseUrl: string, allowlist: readonly string[]): boolean {
@@ -265,7 +267,7 @@ export function buildGatewayModelIndex(
 	if (config.enabled && catalog) {
 		for (const [provider, providerConfig] of Object.entries(catalog.providers)) {
 			if (providerConfig.auth !== "none" && !providerHasCredential(snapshot, provider)) continue;
-			if (!providerConfig.baseUrl || !isGatewayCatalogBaseUrlAllowed(providerConfig.baseUrl, config.allowedBaseUrls))
+			if (providerConfig.baseUrl && !isGatewayCatalogBaseUrlAllowed(providerConfig.baseUrl, config.allowedBaseUrls))
 				continue;
 			const providerCompat = providerConfig.disableStrictTools
 				? mergeCompat(providerConfig.compat, { disableStrictTools: true })
@@ -273,7 +275,7 @@ export function buildGatewayModelIndex(
 			const overrides = providerConfig.modelOverrides ?? {};
 			for (const modelDef of providerConfig.models ?? []) {
 				const modelBaseUrl = modelDef.baseUrl ?? providerConfig.baseUrl;
-				if (!isGatewayCatalogBaseUrlAllowed(modelBaseUrl, config.allowedBaseUrls)) continue;
+				if (!modelBaseUrl || !isGatewayCatalogBaseUrlAllowed(modelBaseUrl, config.allowedBaseUrls)) continue;
 				const overlay = buildCustomModelOverlay(
 					provider,
 					modelBaseUrl,
