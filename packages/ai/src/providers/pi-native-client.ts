@@ -166,7 +166,7 @@ export function streamPiNative<TApi extends Api>(
 				model as Model<Api>,
 				typeof options?.apiKey === "string" ? options.apiKey : undefined,
 			);
-			const modelId = model.id.includes("/") ? model.id : `${model.provider}/${model.id}`;
+			const modelId = model.requestModelId ?? `${model.provider}/${model.id}`;
 			const body = JSON.stringify({
 				modelId,
 				context,

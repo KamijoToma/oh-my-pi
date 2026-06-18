@@ -433,6 +433,7 @@ export async function discoverOpenAIModelsList(
 			contextWindow?: unknown;
 			maxTokens?: unknown;
 			supportsTools?: boolean;
+			requestModelId?: string;
 		}>;
 	};
 	const models = payload.data ?? [];
@@ -464,6 +465,7 @@ export async function discoverOpenAIModelsList(
 				maxTokens:
 					toPositiveNumberOrUndefined(item.maxTokens) ?? Math.min(contextWindow, discoveryDefaultMaxTokens(api)),
 				headers,
+				requestModelId: typeof item.requestModelId === "string" ? item.requestModelId : undefined,
 				supportsTools: toBooleanOrUndefined(item.supportsTools),
 				compat: {
 					supportsStore: false,

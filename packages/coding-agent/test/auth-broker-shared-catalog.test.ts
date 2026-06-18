@@ -152,6 +152,16 @@ describe("auth-broker shared catalog", () => {
 				},
 			}),
 		).toThrow(/model override acme-model apiKey/);
+		expect(() =>
+			validateSharedBrokerCatalog({
+				providers: {
+					acme: {
+						baseUrl: "https://acme.example/v1",
+						token: "sk-test-abcdefghijklmnopqrstuvwxyz",
+					} as never,
+				},
+			}),
+		).toThrow(/unknown field token/);
 	});
 
 	test("loadSharedBrokerCatalog can opt into local literal apiKey ingestion without serving it", async () => {

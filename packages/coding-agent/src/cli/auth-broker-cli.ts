@@ -178,6 +178,43 @@ function validateNoNestedApiKey(context: string, value: object): void {
 	if ("apiKey" in value) throw new Error(`${context} apiKey is not allowed in broker shared catalog`);
 }
 
+function validateNoSecretUnknownProviderFields(provider: string, providerConfig: SharedProviderConfig): void {
+	const knownFields = new Set([
+		"baseUrl",
+		"api",
+		"apiKey",
+		"headers",
+		"authHeader",
+		"auth",
+		"discovery",
+		"models",
+		"modelOverrides",
+		"disableStrictTools",
+		"compat",
+		"transport",
+	]);
+	for (const [field, value] of Object.entries(providerConfig)) {
+		if (knownFields.has(field) || typeof value !== "string") continue;
+		if (isSecretReference(value)) {
+			throw new Error(`Provider ${provider}: unknown field ${field} is not allowed in broker shared catalog`);
+		}
+	}
+}
+
+function sanitizeProviderConfig(providerConfig: SharedProviderConfig): ModelsConfigResponse["providers"][string] {
+	const { baseUrl, api, headers, authHeader, auth, discovery, disableStrictTools, compat } = providerConfig;
+	return {
+		...(baseUrl !== undefined ? { baseUrl } : {}),
+		...(api !== undefined ? { api } : {}),
+		...(headers !== undefined ? { headers } : {}),
+		...(authHeader === false ? { authHeader } : {}),
+		...(auth !== undefined ? { auth } : {}),
+		...(discovery !== undefined ? { discovery } : {}),
+		...(disableStrictTools !== undefined ? { disableStrictTools } : {}),
+		...(compat !== undefined ? { compat: compat as ModelsConfigResponse["providers"][string]["compat"] } : {}),
+	};
+}
+
 function sanitizeModelDefinition(model: SharedModelDefinition): SanitizedModelDefinition {
 	const {
 		id,
@@ -272,6 +309,7 @@ export function validateSharedBrokerCatalog(config: ModelsConfig, opts: SharedBr
 			throw new Error(`Provider ${provider}: authHeader is not supported in broker shared catalog`);
 		}
 		validateSharedHeaders(`Provider ${provider}: secret-bearing`, providerConfig.headers);
+		validateNoSecretUnknownProviderFields(provider, providerConfig);
 		for (const model of providerConfig.models ?? []) {
 			validateNoNestedApiKey(`Provider ${provider}: model ${model.id}`, model);
 			validateSharedHeaders(`Provider ${provider}: model ${model.id}`, model.headers);
@@ -346,16 +384,8 @@ async function materializeSharedCatalogDiscovery(
 function sanitizeSharedCatalog(config: ModelsConfig, generatedAt: number): ModelsConfigResponse {
 	const providers: ModelsConfigResponse["providers"] = {};
 	for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
-		const {
-			apiKey: _apiKey,
-			transport: _transport,
-			authHeader,
-			models,
-			modelOverrides,
-			compat,
-			...sanitized
-		} = providerConfig;
-		const providerResponse: ModelsConfigResponse["providers"][string] = { ...sanitized };
+		const { models, modelOverrides, compat } = providerConfig;
+		const providerResponse = sanitizeProviderConfig(providerConfig);
 		if (models) providerResponse.models = models.map(sanitizeModelDefinition);
 		if (modelOverrides) {
 			providerResponse.modelOverrides = Object.fromEntries(
@@ -363,7 +393,6 @@ function sanitizeSharedCatalog(config: ModelsConfig, generatedAt: number): Model
 			);
 		}
 		if (compat) providerResponse.compat = compat as ModelsConfigResponse["providers"][string]["compat"];
-		if (authHeader === false) providerResponse.authHeader = authHeader;
 		providers[provider] = providerResponse;
 	}
 	return {

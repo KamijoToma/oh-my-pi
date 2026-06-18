@@ -805,6 +805,7 @@ function handleModelsList(opts: AuthGatewayBootOptions): Response {
 		cost: model.cost,
 		contextWindow: model.contextWindow,
 		maxTokens: model.maxTokens,
+		requestModelId: `${model.provider}/${model.id}`,
 		...(model.supportsTools !== undefined ? { supportsTools: model.supportsTools } : {}),
 	}));
 	return json(200, { object: "list", data });

@@ -455,6 +455,60 @@ describe("pi-native keyless gateway dispatch", () => {
 		}
 	});
 
+	it("keeps local provider prefix for slashy non-gateway model ids", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-slashy-pi-native-"));
+		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		let requestedModelId: string | undefined;
+		await storage.setRuntimeApiKey("openrouter", "test-key");
+		const final = baseAssistant({ api: "slashy-test-api", provider: "openrouter", model: "anthropic/claude-sonnet" });
+		registerCustomApi("slashy-test-api", (model: Model<Api>) => {
+			requestedModelId = `${model.provider}/${model.id}`;
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => stream.end(final));
+			return stream;
+		});
+		const handle = startAuthGateway({
+			storage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [],
+			resolveModel: id => {
+				if (id !== "openrouter/anthropic/claude-sonnet") return undefined;
+				return buildModel({
+					id: "anthropic/claude-sonnet",
+					name: "OpenRouter Claude",
+					provider: "openrouter",
+					api: "slashy-test-api",
+					baseUrl: "https://openrouter.example/v1",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128000,
+					maxTokens: 16384,
+				});
+			},
+		});
+		try {
+			const res = await fetch(`${handle.url}/v1/pi/stream`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({
+					modelId: "openrouter/anthropic/claude-sonnet",
+					context: baseContext,
+					stream: false,
+				}),
+			});
+			expect(res.status).toBe(200);
+			expect(requestedModelId).toBe("openrouter/anthropic/claude-sonnet");
+		} finally {
+			await handle.close();
+			storage.close();
+			store.close();
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+
 	it("allows auth:none OpenAI-compatible models without broker credentials", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-keyless-openai-"));
 		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
