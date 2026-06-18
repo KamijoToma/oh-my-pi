@@ -267,6 +267,9 @@ export function buildGatewayModelIndex(
 			if (providerConfig.auth !== "none" && !providerHasCredential(snapshot, provider)) continue;
 			if (!providerConfig.baseUrl || !isGatewayCatalogBaseUrlAllowed(providerConfig.baseUrl, config.allowedBaseUrls))
 				continue;
+			const providerCompat = providerConfig.disableStrictTools
+				? mergeCompat(providerConfig.compat, { disableStrictTools: true })
+				: providerConfig.compat;
 			const overrides = providerConfig.modelOverrides ?? {};
 			for (const modelDef of providerConfig.models ?? []) {
 				const modelBaseUrl = modelDef.baseUrl ?? providerConfig.baseUrl;
@@ -278,7 +281,7 @@ export function buildGatewayModelIndex(
 					providerConfig.headers,
 					undefined,
 					providerConfig.authHeader,
-					providerConfig.compat,
+					providerCompat,
 					providerConfig.auth as ProviderAuthMode | undefined,
 					{
 						id: modelDef.id,
@@ -294,7 +297,7 @@ export function buildGatewayModelIndex(
 						maxTokens: modelDef.maxTokens ?? undefined,
 						omitMaxOutputTokens: modelDef.omitMaxOutputTokens,
 						headers: modelDef.headers,
-						compat: mergeCompat(providerConfig.compat, modelDef.compat),
+						compat: mergeCompat(providerCompat, modelDef.compat),
 						contextPromotionTarget: modelDef.contextPromotionTarget,
 						premiumMultiplier: modelDef.premiumMultiplier,
 					},

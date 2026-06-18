@@ -77,6 +77,24 @@ describe("auth-gateway broker-served catalog", () => {
 		expect(keyless ? index.models.includes(keyless) : false).toBe(true);
 	});
 
+	test("preserves provider disableStrictTools compat on catalog models", () => {
+		const index = buildGatewayModelIndex(
+			snapshot(["acme"]),
+			catalog({
+				acme: {
+					baseUrl: "https://acme.example/v1",
+					api: "openai-completions",
+					disableStrictTools: true,
+					models: [{ id: "custom-chat" }],
+				},
+			}),
+			{ enabled: true, allowedBaseUrls: [] },
+		);
+
+		const model = index.byId.get("acme/custom-chat");
+		expect((model?.compatConfig as { disableStrictTools?: boolean } | undefined)?.disableStrictTools).toBe(true);
+	});
+
 	test("ignores catalog models when disabled or baseUrl is outside the allowlist", () => {
 		const response = catalog({
 			acme: {

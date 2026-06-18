@@ -139,6 +139,12 @@ export interface SharedBrokerCatalogLoadOptions {
 	fetch?: FetchImpl;
 }
 
+type SharedProviderConfig = NonNullable<ModelsConfig["providers"]>[string];
+type SharedModelDefinition = NonNullable<SharedProviderConfig["models"]>[number];
+type SharedModelOverride = NonNullable<SharedProviderConfig["modelOverrides"]>[string];
+type SanitizedModelDefinition = NonNullable<ModelsConfigResponse["providers"][string]["models"]>[number];
+type SanitizedModelOverride = NonNullable<ModelsConfigResponse["providers"][string]["modelOverrides"]>[string];
+
 function getDefaultSharedCatalogPath(): string {
 	return path.join(getConfigRootDir(), "models-shared.yml");
 }
@@ -168,6 +174,83 @@ function validateSharedHeaders(context: string, headers: Record<string, string> 
 	}
 }
 
+function validateNoNestedApiKey(context: string, value: object): void {
+	if ("apiKey" in value) throw new Error(`${context} apiKey is not allowed in broker shared catalog`);
+}
+
+function sanitizeModelDefinition(model: SharedModelDefinition): SanitizedModelDefinition {
+	const {
+		id,
+		name,
+		api,
+		baseUrl,
+		reasoning,
+		thinking,
+		input,
+		supportsTools,
+		cost,
+		premiumMultiplier,
+		contextWindow,
+		maxTokens,
+		omitMaxOutputTokens,
+		headers,
+		compat,
+		contextPromotionTarget,
+	} = model;
+	return {
+		id,
+		...(name !== undefined ? { name } : {}),
+		...(api !== undefined ? { api } : {}),
+		...(baseUrl !== undefined ? { baseUrl } : {}),
+		...(reasoning !== undefined ? { reasoning } : {}),
+		...(thinking !== undefined ? { thinking } : {}),
+		...(input !== undefined ? { input } : {}),
+		...(supportsTools !== undefined ? { supportsTools } : {}),
+		...(cost !== undefined ? { cost } : {}),
+		...(premiumMultiplier !== undefined ? { premiumMultiplier } : {}),
+		...(contextWindow !== undefined ? { contextWindow } : {}),
+		...(maxTokens !== undefined ? { maxTokens } : {}),
+		...(omitMaxOutputTokens !== undefined ? { omitMaxOutputTokens } : {}),
+		...(headers !== undefined ? { headers } : {}),
+		...(compat !== undefined ? { compat } : {}),
+		...(contextPromotionTarget !== undefined ? { contextPromotionTarget } : {}),
+	};
+}
+
+function sanitizeModelOverride(override: SharedModelOverride): SanitizedModelOverride {
+	const {
+		name,
+		reasoning,
+		thinking,
+		input,
+		supportsTools,
+		cost,
+		premiumMultiplier,
+		contextWindow,
+		maxTokens,
+		omitMaxOutputTokens,
+		headers,
+		compat,
+		contextPromotionTarget,
+	} = override;
+	const sanitized = {
+		...(name !== undefined ? { name } : {}),
+		...(reasoning !== undefined ? { reasoning } : {}),
+		...(thinking !== undefined ? { thinking } : {}),
+		...(input !== undefined ? { input } : {}),
+		...(supportsTools !== undefined ? { supportsTools } : {}),
+		...(cost !== undefined ? { cost } : {}),
+		...(premiumMultiplier !== undefined ? { premiumMultiplier } : {}),
+		...(contextWindow !== undefined ? { contextWindow } : {}),
+		...(maxTokens !== undefined ? { maxTokens } : {}),
+		...(omitMaxOutputTokens !== undefined ? { omitMaxOutputTokens } : {}),
+		...(headers !== undefined ? { headers } : {}),
+		...(compat !== undefined ? { compat } : {}),
+		...(contextPromotionTarget !== undefined ? { contextPromotionTarget } : {}),
+	};
+	return sanitized as SanitizedModelOverride;
+}
+
 export function validateSharedBrokerCatalog(config: ModelsConfig, opts: SharedBrokerCatalogLoadOptions = {}): void {
 	for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
 		const apiKey = providerConfig.apiKey;
@@ -190,9 +273,11 @@ export function validateSharedBrokerCatalog(config: ModelsConfig, opts: SharedBr
 		}
 		validateSharedHeaders(`Provider ${provider}: secret-bearing`, providerConfig.headers);
 		for (const model of providerConfig.models ?? []) {
+			validateNoNestedApiKey(`Provider ${provider}: model ${model.id}`, model);
 			validateSharedHeaders(`Provider ${provider}: model ${model.id}`, model.headers);
 		}
 		for (const [modelId, override] of Object.entries(providerConfig.modelOverrides ?? {})) {
+			validateNoNestedApiKey(`Provider ${provider}: model override ${modelId}`, override);
 			validateSharedHeaders(`Provider ${provider}: model override ${modelId}`, override.headers);
 		}
 	}
@@ -271,10 +356,11 @@ function sanitizeSharedCatalog(config: ModelsConfig, generatedAt: number): Model
 			...sanitized
 		} = providerConfig;
 		const providerResponse: ModelsConfigResponse["providers"][string] = { ...sanitized };
-		if (models) providerResponse.models = models as ModelsConfigResponse["providers"][string]["models"];
+		if (models) providerResponse.models = models.map(sanitizeModelDefinition);
 		if (modelOverrides) {
-			providerResponse.modelOverrides =
-				modelOverrides as ModelsConfigResponse["providers"][string]["modelOverrides"];
+			providerResponse.modelOverrides = Object.fromEntries(
+				Object.entries(modelOverrides).map(([modelId, override]) => [modelId, sanitizeModelOverride(override)]),
+			);
 		}
 		if (compat) providerResponse.compat = compat as ModelsConfigResponse["providers"][string]["compat"];
 		if (authHeader === false) providerResponse.authHeader = authHeader;
@@ -313,7 +399,10 @@ export async function loadSharedBrokerCatalog(
 	const result = await file.tryLoadAsync();
 	if (result.status === "not-found") {
 		await removeStaleBrokerOwnedKeys(storage, previousBrokerOwnedCredentials, new Map());
-		return undefined;
+		return {
+			catalog: { generatedAt: Date.now(), schemaVersion: 1, providers: {} },
+			brokerOwnedCredentials: new Map(),
+		};
 	}
 	if (result.status === "error") throw result.error;
 	const config = result.value;

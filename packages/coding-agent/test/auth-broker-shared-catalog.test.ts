@@ -132,6 +132,26 @@ describe("auth-broker shared catalog", () => {
 				},
 			}),
 		).toThrow(/model override acme-model header/);
+		expect(() =>
+			validateSharedBrokerCatalog({
+				providers: {
+					acme: {
+						baseUrl: "https://acme.example/v1",
+						models: [{ id: "acme-model", apiKey: SECRET_ENV } as never],
+					},
+				},
+			}),
+		).toThrow(/model acme-model apiKey/);
+		expect(() =>
+			validateSharedBrokerCatalog({
+				providers: {
+					acme: {
+						baseUrl: "https://acme.example/v1",
+						modelOverrides: { "acme-model": { apiKey: SECRET_ENV } as never },
+					},
+				},
+			}),
+		).toThrow(/model override acme-model apiKey/);
 	});
 
 	test("loadSharedBrokerCatalog can opt into local literal apiKey ingestion without serving it", async () => {
@@ -170,6 +190,32 @@ describe("auth-broker shared catalog", () => {
 				type: "api_key",
 				key: "sk-test-abcdefghijklmnopqrstuvwxyz",
 			});
+		} finally {
+			storage.close();
+			store.close();
+		}
+	});
+
+	test("loadSharedBrokerCatalog returns an empty served catalog after removing a previously loaded file", async () => {
+		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		try {
+			const file = path.join(agentDir, "models-shared.yml");
+			await Bun.write(
+				file,
+				`providers:\n  acme:\n    baseUrl: https://acme.example/v1\n    apiKey: ${SECRET_ENV}\n    api: openai-completions\n    models:\n      - id: acme-model\n`,
+			);
+			const first = await loadSharedBrokerCatalog(file, storage);
+			expect(storage.listStoredCredentials("acme")).toHaveLength(1);
+			await fs.rm(file);
+
+			const loaded = await loadSharedBrokerCatalog(file, storage, first?.brokerOwnedCredentials);
+
+			expect(loaded?.catalog.providers).toEqual({});
+			expect(loaded?.brokerOwnedCredentials.size).toBe(0);
+			await storage.reload();
+			expect(storage.listStoredCredentials("acme")).toEqual([]);
 		} finally {
 			storage.close();
 			store.close();
