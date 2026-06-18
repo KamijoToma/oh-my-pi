@@ -22,9 +22,12 @@ import {
 	type AuthCredential,
 	AuthStorage,
 	type CredentialDisabledEvent,
+	DEFAULT_AUTH_BROKER_BIND,
+	type FetchImpl,
 	getEnvApiKey,
 	getOAuthProviders,
 	listProvidersWithEnvKey,
+	type Model,
 	type ModelsConfigResponse,
 	type OAuthCredential,
 	type OAuthProvider,
@@ -37,7 +40,8 @@ import { $which, APP_NAME, getAgentDbPath, getConfigRootDir, isEnoent, logger, V
 import { setTransports as setLoggerTransports } from "@oh-my-pi/pi-utils/logger";
 import { $ } from "bun";
 import chalk from "chalk";
-import { looksLikeLiteralSecret, resolveConfigValue } from "../config/custom-model-builder";
+import { looksLikeLiteralSecret, resolveConfigHeaders, resolveConfigValue } from "../config/custom-model-builder";
+import { discoverModelsByProviderType } from "../config/model-discovery";
 import { ModelsConfigFile } from "../config/models-config";
 import type { ModelsConfig } from "../config/models-config-schema";
 import { resolveAuthBrokerConfig } from "../session/auth-broker-config";
@@ -63,6 +67,8 @@ export interface AuthBrokerCommandArgs {
 		includeEnv?: boolean;
 		/** `migrate`: required `--from-local` source. Reserved for future sources. */
 		fromLocal?: boolean;
+		dangerouslyAllowLocalRawKeys?: boolean;
+		catalogRefreshIntervalMs?: number;
 	};
 }
 
@@ -129,6 +135,11 @@ export interface SharedBrokerCatalogLoad {
 	brokerOwnedCredentials: BrokerOwnedCredentialMap;
 }
 
+export interface SharedBrokerCatalogLoadOptions {
+	dangerouslyAllowLocalRawKeys?: boolean;
+	fetch?: FetchImpl;
+}
+
 function getDefaultSharedCatalogPath(): string {
 	return path.join(getConfigRootDir(), "models-shared.yml");
 }
@@ -139,8 +150,9 @@ function isSecretReference(value: string): boolean {
 	return /^[A-Z_][A-Z0-9_]*$/.test(value);
 }
 
-function resolveSharedApiKey(value: string): string | undefined {
+function resolveSharedApiKey(value: string, opts: SharedBrokerCatalogLoadOptions = {}): string | undefined {
 	if (value.startsWith("!")) return resolveConfigValue(value);
+	if (looksLikeLiteralSecret(value) && opts.dangerouslyAllowLocalRawKeys) return value;
 	return Bun.env[value];
 }
 
@@ -157,23 +169,24 @@ function validateSharedHeaders(context: string, headers: Record<string, string> 
 	}
 }
 
-export function validateSharedBrokerCatalog(config: ModelsConfig): void {
+export function validateSharedBrokerCatalog(config: ModelsConfig, opts: SharedBrokerCatalogLoadOptions = {}): void {
 	for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
 		const apiKey = providerConfig.apiKey;
 		if (apiKey !== undefined) {
 			if (apiKey.length === 0)
 				throw new Error(`Provider ${provider}: empty apiKey is not allowed in models-shared.yml`);
 			if (looksLikeLiteralSecret(apiKey)) {
-				throw new Error(`Provider ${provider}: apiKey appears to be a literal secret`);
-			}
-			if (!isSupportedApiKeyReference(apiKey)) {
+				if (!opts.dangerouslyAllowLocalRawKeys) {
+					throw new Error(`Provider ${provider}: apiKey appears to be a literal secret`);
+				}
+			} else if (!isSupportedApiKeyReference(apiKey)) {
 				throw new Error(`Provider ${provider}: apiKey reference must be an environment variable or !cmd`);
 			}
 		}
 		if (providerConfig.transport !== undefined) {
 			throw new Error(`Provider ${provider}: transport is not supported in broker shared catalog`);
 		}
-		if (providerConfig.authHeader === true) {
+		if (providerConfig.authHeader === true && !opts.dangerouslyAllowLocalRawKeys) {
 			throw new Error(`Provider ${provider}: authHeader is not supported in broker shared catalog`);
 		}
 		validateSharedHeaders(`Provider ${provider}: secret-bearing`, providerConfig.headers);
@@ -184,6 +197,66 @@ export function validateSharedBrokerCatalog(config: ModelsConfig): void {
 			validateSharedHeaders(`Provider ${provider}: model override ${modelId}`, override.headers);
 		}
 	}
+}
+
+async function materializeSharedCatalogDiscovery(
+	config: ModelsConfig,
+	resolvedApiKeys: Map<string, string>,
+	opts: SharedBrokerCatalogLoadOptions,
+): Promise<ModelsConfig> {
+	const providers = { ...(config.providers ?? {}) };
+	const fetchImpl = opts.fetch ?? fetch;
+	for (const [provider, providerConfig] of Object.entries(providers)) {
+		if (!providerConfig.discovery) continue;
+		if (!providerConfig.api && providerConfig.discovery.type !== "proxy") continue;
+		const headers = resolveConfigHeaders(providerConfig.headers) ?? {};
+		const apiKey = resolvedApiKeys.get(provider);
+		const discoveryHeaders =
+			providerConfig.authHeader && apiKey ? { ...headers, Authorization: `Bearer ${apiKey}` } : headers;
+		let discovered: Model[];
+		try {
+			discovered = await discoverModelsByProviderType(
+				{
+					provider,
+					api: providerConfig.api ?? "openai-completions",
+					baseUrl: providerConfig.baseUrl,
+					headers: discoveryHeaders,
+					compat: providerConfig.compat,
+					discovery: providerConfig.discovery,
+				},
+				{
+					fetch: fetchImpl,
+					getBearerApiKeyResolver: async id =>
+						id === provider && !providerConfig.authHeader ? apiKey : undefined,
+				},
+			);
+		} catch (error) {
+			logger.warn("auth-broker shared catalog discovery failed", { provider, error: String(error) });
+			continue;
+		}
+		const models: NonNullable<NonNullable<ModelsConfig["providers"]>[string]["models"]> = discovered.map(model => ({
+			id: model.id,
+			name: model.name,
+			api: model.api as NonNullable<
+				NonNullable<NonNullable<ModelsConfig["providers"]>[string]["models"]>[number]["api"]
+			>,
+			baseUrl: model.baseUrl === providerConfig.baseUrl ? undefined : model.baseUrl,
+			reasoning: model.reasoning,
+			input: model.input,
+			supportsTools: model.supportsTools,
+			contextWindow: model.contextWindow ?? undefined,
+			maxTokens: model.maxTokens ?? undefined,
+			omitMaxOutputTokens: model.omitMaxOutputTokens,
+			compat: model.compatConfig,
+			contextPromotionTarget: model.contextPromotionTarget,
+			premiumMultiplier: model.premiumMultiplier,
+		}));
+		providers[provider] = {
+			...providerConfig,
+			models,
+		};
+	}
+	return { ...config, providers };
 }
 
 function sanitizeSharedCatalog(config: ModelsConfig, generatedAt: number): ModelsConfigResponse {
@@ -234,6 +307,7 @@ export async function loadSharedBrokerCatalog(
 	sharedPath: string,
 	storage: AuthStorage,
 	previousBrokerOwnedCredentials: BrokerOwnedCredentialMap = new Map(),
+	opts: SharedBrokerCatalogLoadOptions = {},
 ): Promise<SharedBrokerCatalogLoad | undefined> {
 	const file = ModelsConfigFile.relocate(sharedPath);
 	file.invalidate();
@@ -244,12 +318,14 @@ export async function loadSharedBrokerCatalog(
 	}
 	if (result.status === "error") throw result.error;
 	const config = result.value;
-	validateSharedBrokerCatalog(config);
+	validateSharedBrokerCatalog(config, opts);
 	const brokerOwnedCredentials: BrokerOwnedCredentialMap = new Map();
+	const resolvedApiKeys = new Map<string, string>();
 	for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
 		if (!providerConfig.apiKey) continue;
-		const resolved = resolveSharedApiKey(providerConfig.apiKey);
+		const resolved = resolveSharedApiKey(providerConfig.apiKey, opts);
 		if (!resolved) throw new Error(`Unable to resolve apiKey for shared provider ${provider}`);
+		resolvedApiKeys.set(provider, resolved);
 		const previousIds = previousBrokerOwnedCredentials.get(provider);
 		const existingIds = new Set(
 			storage
@@ -265,7 +341,38 @@ export async function loadSharedBrokerCatalog(
 		brokerOwnedCredentials.set(provider, new Set(brokerOwnedIds));
 	}
 	await removeStaleBrokerOwnedKeys(storage, previousBrokerOwnedCredentials, brokerOwnedCredentials);
-	return { catalog: sanitizeSharedCatalog(config, Date.now()), brokerOwnedCredentials };
+	const materializedConfig = await materializeSharedCatalogDiscovery(config, resolvedApiKeys, opts);
+	return { catalog: sanitizeSharedCatalog(materializedConfig, Date.now()), brokerOwnedCredentials };
+}
+
+export interface SharedCatalogAutoRefreshOptions {
+	intervalMs?: number;
+	reload: () => Promise<ModelsConfigResponse>;
+	onReload?: (catalog: ModelsConfigResponse) => void;
+}
+
+export function startSharedCatalogAutoRefresh(opts: SharedCatalogAutoRefreshOptions): (() => void) | undefined {
+	const intervalMs = opts.intervalMs;
+	if (intervalMs === undefined || intervalMs <= 0) return undefined;
+	let reloading = false;
+	const timer: NodeJS.Timeout = setInterval(() => {
+		if (reloading) return;
+		reloading = true;
+		opts
+			.reload()
+			.then(catalog => {
+				opts.onReload?.(catalog);
+				logger.info("auth-broker shared catalog auto-refresh completed", { generatedAt: catalog.generatedAt });
+			})
+			.catch(error => {
+				logger.warn("auth-broker shared catalog auto-refresh failed", { error: String(error) });
+			})
+			.finally(() => {
+				reloading = false;
+			});
+	}, intervalMs);
+	timer.unref?.();
+	return () => clearInterval(timer);
 }
 
 async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
@@ -281,23 +388,34 @@ async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 	const storage = new AuthStorage(store);
 	await storage.reload();
 	const sharedCatalogPath = Bun.env.OMP_BROKER_SHARED_CONFIG ?? getDefaultSharedCatalogPath();
-	let sharedCatalog = await loadSharedBrokerCatalog(sharedCatalogPath, storage);
+	if (flags.dangerouslyAllowLocalRawKeys) {
+		logger.warn("auth-broker accepting literal apiKey values from shared catalog for local ingestion only");
+	}
+	let sharedCatalog = await loadSharedBrokerCatalog(sharedCatalogPath, storage, new Map(), flags);
+	const reloadSharedCatalog = async (): Promise<ModelsConfigResponse> => {
+		const reloaded = await loadSharedBrokerCatalog(
+			sharedCatalogPath,
+			storage,
+			sharedCatalog?.brokerOwnedCredentials ?? new Map(),
+			flags,
+		);
+		if (!reloaded) throw new Error(`Shared catalog not found: ${sharedCatalogPath}`);
+		sharedCatalog = reloaded;
+		return reloaded.catalog;
+	};
+
 	const handle = startAuthBroker({
 		storage,
 		bind,
 		bearerTokens: [token],
 		version: VERSION,
 		getSharedCatalog: () => sharedCatalog?.catalog,
-		reloadSharedCatalog: async () => {
-			const reloaded = await loadSharedBrokerCatalog(
-				sharedCatalogPath,
-				storage,
-				sharedCatalog?.brokerOwnedCredentials ?? new Map(),
-			);
-			if (!reloaded) throw new Error(`Shared catalog not found: ${sharedCatalogPath}`);
-			sharedCatalog = reloaded;
-			return reloaded.catalog;
-		},
+		reloadSharedCatalog,
+	});
+	const stopCatalogAutoRefresh = startSharedCatalogAutoRefresh({
+		intervalMs: flags.catalogRefreshIntervalMs,
+		reload: reloadSharedCatalog,
+		onReload: catalog => handle.emitCatalogChanged(catalog.generatedAt),
 	});
 	logger.info("auth-broker listening", { url: handle.url });
 	logger.info("auth-broker bearer token loaded", { path: getTokenFilePath(), mode: "0600" });
@@ -315,10 +433,9 @@ async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 
 	const shutdown = async (signal: NodeJS.Signals): Promise<void> => {
 		logger.info("auth-broker shutting down", { signal });
+		stopCatalogAutoRefresh?.();
 		credentialDisabledUnsub();
 		await handle.close();
-		storage.close();
-		process.exit(0);
 	};
 	process.once("SIGINT", () => void shutdown("SIGINT"));
 	process.once("SIGTERM", () => void shutdown("SIGTERM"));

@@ -96,6 +96,9 @@
 
 - Added auth-broker shared catalog loading from `models-shared.yml`, including broker-side API-key resolution, fail-closed secret validation, and sanitized catalog serving hooks.
 - Added auth-gateway broker catalog consumption, including opt-in trust settings, broker-served custom model indexing, hot catalog rebuilds, and keyless custom-provider routing.
+- Added `omp auth-broker serve --dangerously-allow-local-raw-keys` for local-only ingestion of literal shared-catalog API keys while still serving sanitized catalogs.
+- Added broker-side discovery materialization for shared catalogs so discovery-only `models-shared.yml` providers are served with concrete models.
+- Added `omp auth-broker serve --catalog-refresh-interval-ms` to periodically reload and rediscover broker-served shared catalogs.
 
 ## [16.0.5] - 2026-06-17
 

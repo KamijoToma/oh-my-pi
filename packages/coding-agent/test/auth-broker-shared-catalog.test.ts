@@ -1,9 +1,13 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, vi } from "bun:test";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
-import { loadSharedBrokerCatalog, validateSharedBrokerCatalog } from "@oh-my-pi/pi-coding-agent/cli/auth-broker-cli";
+import {
+	loadSharedBrokerCatalog,
+	startSharedCatalogAutoRefresh,
+	validateSharedBrokerCatalog,
+} from "@oh-my-pi/pi-coding-agent/cli/auth-broker-cli";
 import { setAgentDir } from "@oh-my-pi/pi-utils";
 
 const SECRET_ENV = "OMP_TEST_SHARED_CATALOG_KEY";
@@ -27,6 +31,8 @@ describe("auth-broker shared catalog", () => {
 		if (originalSecret === undefined) delete process.env[SECRET_ENV];
 		else process.env[SECRET_ENV] = originalSecret;
 		await fs.rm(agentDir, { recursive: true, force: true });
+		vi.useRealTimers();
+		vi.restoreAllMocks();
 	});
 
 	test("loadSharedBrokerCatalog resolves apiKey on broker and serves sanitized catalog", async () => {
@@ -126,6 +132,223 @@ describe("auth-broker shared catalog", () => {
 				},
 			}),
 		).toThrow(/model override acme-model header/);
+	});
+
+	test("loadSharedBrokerCatalog can opt into local literal apiKey ingestion without serving it", async () => {
+		const file = path.join(agentDir, "models-shared.yml");
+		await Bun.write(
+			file,
+			[
+				"providers:",
+				"  acme:",
+				"    baseUrl: https://acme.example/v1",
+				"    apiKey: sk-test-abcdefghijklmnopqrstuvwxyz",
+				"    api: openai-completions",
+				"    authHeader: true",
+				"    models:",
+				"      - id: acme-model",
+				"",
+			].join("\n"),
+		);
+		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		try {
+			await expect(loadSharedBrokerCatalog(file, storage)).rejects.toThrow(/literal secret/);
+
+			const loaded = await loadSharedBrokerCatalog(file, storage, new Map(), {
+				dangerouslyAllowLocalRawKeys: true,
+			});
+
+			expect(loaded?.catalog.providers.acme).toEqual({
+				baseUrl: "https://acme.example/v1",
+				api: "openai-completions",
+				models: [{ id: "acme-model" }],
+			});
+			expect(loaded?.catalog.providers.acme).not.toHaveProperty("authHeader");
+			expect(storage.listStoredCredentials("acme")[0]?.credential).toEqual({
+				type: "api_key",
+				key: "sk-test-abcdefghijklmnopqrstuvwxyz",
+			});
+		} finally {
+			storage.close();
+			store.close();
+		}
+	});
+
+	test("loadSharedBrokerCatalog materializes broker-side discovery before serving", async () => {
+		const file = path.join(agentDir, "models-shared.yml");
+		await Bun.write(
+			file,
+			[
+				"providers:",
+				"  acme:",
+				"    baseUrl: https://acme.example/v1",
+				"    apiKey: sk-test-abcdefghijklmnopqrstuvwxyz",
+				"    authHeader: true",
+				"    api: openai-completions",
+				"    discovery:",
+				"      type: openai-models-list",
+				"",
+			].join("\n"),
+		);
+		let authorization: string | undefined;
+		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		try {
+			const loaded = await loadSharedBrokerCatalog(file, storage, new Map(), {
+				dangerouslyAllowLocalRawKeys: true,
+				fetch: async (input, init) => {
+					expect(String(input)).toBe("https://acme.example/v1/models");
+					authorization = new Headers(init?.headers).get("authorization") ?? undefined;
+					return Response.json({
+						data: [
+							{
+								id: "acme-model",
+								name: "Acme Model",
+								contextWindow: 123456,
+								maxTokens: 7890,
+								reasoning: true,
+								input: ["text", "image"],
+							},
+						],
+					});
+				},
+			});
+
+			expect(authorization).toBe("Bearer sk-test-abcdefghijklmnopqrstuvwxyz");
+			expect(loaded?.catalog.providers.acme).toMatchObject({
+				baseUrl: "https://acme.example/v1",
+				api: "openai-completions",
+				models: [
+					{
+						id: "acme-model",
+						name: "Acme Model",
+						contextWindow: 123456,
+						maxTokens: 7890,
+						reasoning: true,
+						input: ["text", "image"],
+					},
+				],
+			});
+			expect(loaded?.catalog.providers.acme).not.toHaveProperty("apiKey");
+			expect(loaded?.catalog.providers.acme).not.toHaveProperty("authHeader");
+		} finally {
+			storage.close();
+			store.close();
+		}
+	});
+
+	test("loadSharedBrokerCatalog keeps other discovered providers when one discovery fails", async () => {
+		const file = path.join(agentDir, "models-shared.yml");
+		await Bun.write(
+			file,
+			[
+				"providers:",
+				"  blocked:",
+				"    baseUrl: https://blocked.example/v1",
+				"    apiKey: sk-blocked-abcdefghijklmnopqrstuvwxyz",
+				"    authHeader: true",
+				"    discovery:",
+				"      type: proxy",
+				"  acme:",
+				"    baseUrl: https://acme.example/v1",
+				"    apiKey: sk-test-abcdefghijklmnopqrstuvwxyz",
+				"    authHeader: true",
+				"    discovery:",
+				"      type: proxy",
+				"",
+			].join("\n"),
+		);
+		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		try {
+			const loaded = await loadSharedBrokerCatalog(file, storage, new Map(), {
+				dangerouslyAllowLocalRawKeys: true,
+				fetch: async input => {
+					const url = String(input);
+					if (url === "https://blocked.example/v1/models") return new Response("blocked", { status: 403 });
+					if (url === "https://acme.example/v1/models") {
+						return Response.json({ data: [{ id: "acme-model", supported_endpoint_types: ["openai"] }] });
+					}
+					throw new Error(`Unexpected URL: ${url}`);
+				},
+			});
+
+			expect(loaded?.catalog.providers.blocked.models).toBeUndefined();
+			expect(loaded?.catalog.providers.acme.models?.map(model => model.id)).toEqual(["acme-model"]);
+		} finally {
+			storage.close();
+			store.close();
+		}
+	});
+
+	async function flushMicrotasks(): Promise<void> {
+		await Promise.resolve();
+		await Promise.resolve();
+		await Promise.resolve();
+	}
+	test("shared catalog auto refresh runs on the configured interval", async () => {
+		vi.useFakeTimers();
+		let reloads = 0;
+		const stop = startSharedCatalogAutoRefresh({
+			intervalMs: 1000,
+			reload: async () => {
+				reloads += 1;
+				return {
+					generatedAt: reloads,
+					schemaVersion: 1,
+					providers: {},
+				};
+			},
+		});
+		try {
+			expect(reloads).toBe(0);
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(reloads).toBe(1);
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(reloads).toBe(2);
+		} finally {
+			stop?.();
+		}
+	});
+
+	test("shared catalog auto refresh skips overlapping reloads", async () => {
+		vi.useFakeTimers();
+		const pending = Promise.withResolvers<void>();
+		let reloads = 0;
+		const stop = startSharedCatalogAutoRefresh({
+			intervalMs: 1000,
+			reload: async () => {
+				reloads += 1;
+				await pending.promise;
+				return {
+					generatedAt: reloads,
+					schemaVersion: 1,
+					providers: {},
+				};
+			},
+		});
+		try {
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(reloads).toBe(1);
+			vi.advanceTimersByTime(3000);
+			await flushMicrotasks();
+			expect(reloads).toBe(1);
+			pending.resolve();
+			await flushMicrotasks();
+			vi.advanceTimersByTime(1000);
+			await flushMicrotasks();
+			expect(reloads).toBe(2);
+		} finally {
+			pending.resolve();
+			stop?.();
+		}
 	});
 
 	test("loadSharedBrokerCatalog rejects unresolved env apiKey references", async () => {
