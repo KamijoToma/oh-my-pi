@@ -68,6 +68,10 @@
 - Added broker-side `/v1/models-config` serving and `/v1/catalog/reload` with `catalog-changed` SSE pulses for shared catalog reloads.
 - Added encrypted broker catalog cache helpers for gateway offline boot from the latest sanitized catalog.
 
+### Changed
+
+- Changed auth-gateway model listing to return provider-qualified model IDs with OMP metadata so broker catalog clients can distinguish duplicate model IDs.
+
 ### Fixed
 
 - Fixed auth-broker snapshot stream clients to ignore unknown future events after the initial snapshot while still surfacing `catalog-changed` events.

@@ -289,6 +289,71 @@ describe("pi-native encodeStream", () => {
 	});
 });
 
+describe("auth-gateway model listing", () => {
+	it("returns qualified ids and OMP metadata for listed models", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-models-list-"));
+		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		const handle = startAuthGateway({
+			storage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [],
+			resolveModel: () => undefined,
+			listModels: () => [
+				buildModel({
+					id: "same-id",
+					name: "Acme Same",
+					provider: "acme",
+					api: "openai-completions",
+					baseUrl: "https://acme.example/v1",
+					reasoning: true,
+					input: ["text", "image"],
+					cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+					contextWindow: 123456,
+					maxTokens: 7890,
+					supportsTools: true,
+				}),
+				buildModel({
+					id: "same-id",
+					name: "Beta Same",
+					provider: "beta",
+					api: "openai-completions",
+					baseUrl: "https://beta.example/v1",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 64000,
+					maxTokens: 2048,
+				}),
+			],
+		});
+		try {
+			const res = await fetch(`${handle.url}/v1/models`);
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { data: Array<Record<string, unknown>> };
+			expect(body.data.map(item => item.id)).toEqual(["acme/same-id", "beta/same-id"]);
+			expect(body.data[0]).toMatchObject({
+				id: "acme/same-id",
+				owned_by: "acme",
+				api: "openai-completions",
+				name: "Acme Same",
+				reasoning: true,
+				input: ["text", "image"],
+				contextWindow: 123456,
+				maxTokens: 7890,
+				supportsTools: true,
+				cost: { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 },
+			});
+		} finally {
+			await handle.close();
+			storage.close();
+			store.close();
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
+});
+
 describe("pi-native keyless gateway dispatch", () => {
 	it("allows auth:none catalog models without broker credentials", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-keyless-"));

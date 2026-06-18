@@ -794,10 +794,18 @@ async function handleCredentialsCheck(storage: AuthStorage, signal: AbortSignal)
 function handleModelsList(opts: AuthGatewayBootOptions): Response {
 	const list = opts.listModels ? Array.from(opts.listModels()) : [];
 	const data = list.map(model => ({
-		id: model.id,
+		id: `${model.provider}/${model.id}`,
 		object: "model" as const,
 		owned_by: model.provider,
 		api: model.api,
+		name: model.name,
+		reasoning: model.reasoning,
+		thinking: model.thinking,
+		input: model.input,
+		cost: model.cost,
+		contextWindow: model.contextWindow,
+		maxTokens: model.maxTokens,
+		...(model.supportsTools !== undefined ? { supportsTools: model.supportsTools } : {}),
 	}));
 	return json(200, { object: "list", data });
 }
