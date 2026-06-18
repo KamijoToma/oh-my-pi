@@ -404,6 +404,56 @@ describe("pi-native keyless gateway dispatch", () => {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
+	it("routes pi-native qualified remote ids without local gateway provider prefix", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-qualified-pi-native-"));
+		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.setRuntimeApiKey("acme", "test-key");
+		await storage.reload();
+		let requestedModelId: string | undefined;
+		const final = baseAssistant({ api: "qualified-test-api", provider: "acme", model: "same-id" });
+		registerCustomApi("qualified-test-api", (model: Model<Api>) => {
+			requestedModelId = model.id;
+			const stream = new AssistantMessageEventStream();
+			queueMicrotask(() => stream.end(final));
+			return stream;
+		});
+		const handle = startAuthGateway({
+			storage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [],
+			resolveModel: id => {
+				if (id !== "acme/same-id") return undefined;
+				return buildModel({
+					id: "same-id",
+					name: "Acme Same",
+					provider: "acme",
+					api: "qualified-test-api",
+					baseUrl: "https://acme.example/v1",
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128000,
+					maxTokens: 16384,
+				});
+			},
+		});
+		try {
+			const res = await fetch(`${handle.url}/v1/pi/stream`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ modelId: "acme/same-id", context: baseContext, stream: false }),
+			});
+			expect(res.status).toBe(200);
+			expect((await res.json()) as { message: unknown }).toEqual({ message: JSON.parse(JSON.stringify(final)) });
+			expect(requestedModelId).toBe("same-id");
+		} finally {
+			await handle.close();
+			storage.close();
+			store.close();
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
 
 	it("allows auth:none OpenAI-compatible models without broker credentials", async () => {
 		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-keyless-openai-"));
