@@ -65,6 +65,7 @@
 ### Added
 
 - Added auth-broker catalog wire schemas, `AuthBrokerClient.fetchCatalog()`, and `RemoteAuthCredentialStore` catalog-change callbacks for forward-compatible gateway catalog integration.
+- Added broker-side `/v1/models-config` serving and `/v1/catalog/reload` with `catalog-changed` SSE pulses for shared catalog reloads.
 
 ### Fixed
 

@@ -6,7 +6,9 @@ import { AuthStorage, REMOTE_REFRESH_SENTINEL, SqliteAuthCredentialStore } from 
 import {
 	AuthBrokerClient,
 	type AuthBrokerServerHandle,
+	type AuthBrokerServerOptions,
 	AuthBrokerStreamUnsupportedError,
+	type ModelsConfigResponse,
 	type SnapshotStreamEvent,
 	startAuthBroker,
 } from "@oh-my-pi/pi-ai/auth-broker";
@@ -248,6 +250,84 @@ describe("auth-broker wire surface", () => {
 			expect(catalog.providers.acme).not.toHaveProperty("transport");
 		} finally {
 			dummy.stop(true);
+		}
+	});
+
+	test("GET /v1/models-config serves the broker catalog callback", async () => {
+		const catalog: ModelsConfigResponse = {
+			generatedAt: 321,
+			schemaVersion: 1,
+			providers: {
+				acme: {
+					baseUrl: "https://acme.example/v1",
+					api: "openai-completions",
+					headers: { "X-Team": "platform" },
+					models: [{ id: "acme-model", name: "Acme Model" }],
+				},
+			},
+		};
+		const localStore = await SqliteAuthCredentialStore.open(path.join(tempDir, "catalog.db"));
+		const localStorage = new AuthStorage(localStore);
+		await localStorage.reload();
+		const localHandle = startAuthBroker({
+			storage: localStorage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [token],
+			disableRefresher: true,
+			getSharedCatalog: () => catalog,
+		} as AuthBrokerServerOptions & { getSharedCatalog: () => ModelsConfigResponse });
+		try {
+			const client = new AuthBrokerClient({ url: localHandle.url, token });
+
+			await expect(client.fetchCatalog()).resolves.toEqual(catalog);
+		} finally {
+			await localHandle.close();
+			localStorage.close();
+			localStore.close();
+		}
+	});
+
+	test("POST /v1/catalog/reload calls broker reload and emits catalog-changed", async () => {
+		let generatedAt = 400;
+		const localStore = await SqliteAuthCredentialStore.open(path.join(tempDir, "catalog-reload.db"));
+		const localStorage = new AuthStorage(localStore);
+		await localStorage.reload();
+		const localHandle = startAuthBroker({
+			storage: localStorage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [token],
+			disableRefresher: true,
+			getSharedCatalog: () => ({ generatedAt, schemaVersion: 1, providers: {} }),
+			reloadSharedCatalog: async () => {
+				generatedAt = 401;
+				return { generatedAt, schemaVersion: 1, providers: {} };
+			},
+		} as AuthBrokerServerOptions & {
+			getSharedCatalog: () => ModelsConfigResponse;
+			reloadSharedCatalog: () => Promise<ModelsConfigResponse>;
+		});
+		const controller = new AbortController();
+		const client = new AuthBrokerClient({ url: localHandle.url, token });
+		const iter = client.openSnapshotStream({ signal: controller.signal });
+		try {
+			const first = await iter.next();
+			if (first.done) throw new Error("expected snapshot frame");
+
+			const reloadResponse = await fetch(`${localHandle.url}/v1/catalog/reload`, {
+				method: "POST",
+				headers: { Authorization: `Bearer ${token}` },
+			});
+
+			expect(reloadResponse.status).toBe(200);
+			expect(await reloadResponse.json()).toEqual({ generatedAt: 401 });
+			const event = await nextMatching(iter, value => value.kind === "catalog-changed");
+			expect(event).toEqual({ kind: "catalog-changed", generatedAt: 401 });
+		} finally {
+			controller.abort();
+			await iter.return(undefined).catch(() => {});
+			await localHandle.close();
+			localStorage.close();
+			localStore.close();
 		}
 	});
 

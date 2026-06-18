@@ -92,6 +92,9 @@
 ### Security
 
 - Secured PDF image reads by validating requested image members against the extracted member list before opening files and refusing traversal-style names
+### Added
+
+- Added auth-broker shared catalog loading from `models-shared.yml`, including broker-side API-key resolution, fail-closed secret validation, and sanitized catalog serving hooks.
 
 ## [16.0.5] - 2026-06-17
 
