@@ -13,8 +13,8 @@ import {
 	startAuthBroker,
 } from "@oh-my-pi/pi-ai/auth-broker";
 import { modelsConfigResponseSchema } from "@oh-my-pi/pi-ai/auth-broker/wire-schemas";
-import { type } from "arktype";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
+import { type } from "arktype";
 
 const ANTHROPIC_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"] as const;
 const savedEnv: Partial<Record<(typeof ANTHROPIC_ENV)[number], string | undefined>> = {};
