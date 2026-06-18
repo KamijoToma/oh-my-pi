@@ -4,6 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { AuthStorage, SqliteAuthCredentialStore } from "@oh-my-pi/pi-ai";
 import {
+	createAuthBrokerShutdownHandlers,
 	loadSharedBrokerCatalog,
 	startSharedCatalogAutoRefresh,
 	validateSharedBrokerCatalog,
@@ -309,6 +310,44 @@ describe("auth-broker shared catalog", () => {
 		}
 	});
 
+	test("loadSharedBrokerCatalog merges discovered models with configured models", async () => {
+		const file = path.join(agentDir, "models-shared.yml");
+		await Bun.write(
+			file,
+			[
+				"providers:",
+				"  acme:",
+				"    baseUrl: https://acme.example/v1",
+				"    apiKey: sk-test-abcdefghijklmnopqrstuvwxyz",
+				"    authHeader: true",
+				"    api: openai-completions",
+				"    discovery:",
+				"      type: openai-models-list",
+				"    models:",
+				"      - id: pinned-model",
+				"        name: Pinned Model",
+				"",
+			].join("\n"),
+		);
+		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		try {
+			const loaded = await loadSharedBrokerCatalog(file, storage, new Map(), {
+				dangerouslyAllowLocalRawKeys: true,
+				fetch: async () => Response.json({ data: [{ id: "discovered-model" }] }),
+			});
+
+			expect(loaded?.catalog.providers.acme.models?.map(model => model.id)).toEqual([
+				"pinned-model",
+				"discovered-model",
+			]);
+		} finally {
+			storage.close();
+			store.close();
+		}
+	});
+
 	test("loadSharedBrokerCatalog keeps other discovered providers when one discovery fails", async () => {
 		const file = path.join(agentDir, "models-shared.yml");
 		await Bun.write(
@@ -352,6 +391,18 @@ describe("auth-broker shared catalog", () => {
 			storage.close();
 			store.close();
 		}
+	});
+
+	test("auth-broker signal shutdown resolves the serve wait", async () => {
+		let closed = false;
+		const handlers = createAuthBrokerShutdownHandlers(async signal => {
+			expect(signal).toBe("SIGTERM");
+			closed = true;
+		});
+
+		await handlers.shutdown("SIGTERM");
+		await expect(handlers.done).resolves.toBeUndefined();
+		expect(closed).toBe(true);
 	});
 
 	async function flushMicrotasks(): Promise<void> {

@@ -356,28 +356,32 @@ async function materializeSharedCatalogDiscovery(
 			logger.warn("auth-broker shared catalog discovery failed", { provider, error: String(error) });
 			continue;
 		}
-		const models: NonNullable<NonNullable<ModelsConfig["providers"]>[string]["models"]> = discovered.map(model => ({
-			id: model.id,
-			name: model.name,
-			api: model.api as NonNullable<
-				NonNullable<NonNullable<ModelsConfig["providers"]>[string]["models"]>[number]["api"]
-			>,
-			baseUrl: model.baseUrl === providerConfig.baseUrl ? undefined : model.baseUrl,
-			reasoning: model.reasoning,
-			thinking: model.thinking,
-			input: model.input,
-			cost: model.cost,
-			supportsTools: model.supportsTools,
-			contextWindow: model.contextWindow ?? undefined,
-			maxTokens: model.maxTokens ?? undefined,
-			omitMaxOutputTokens: model.omitMaxOutputTokens,
-			compat: model.compatConfig,
-			contextPromotionTarget: model.contextPromotionTarget,
-			premiumMultiplier: model.premiumMultiplier,
-		}));
+		const discoveredModels: NonNullable<NonNullable<ModelsConfig["providers"]>[string]["models"]> = discovered.map(
+			model => ({
+				id: model.id,
+				name: model.name,
+				api: model.api as NonNullable<
+					NonNullable<NonNullable<ModelsConfig["providers"]>[string]["models"]>[number]["api"]
+				>,
+				baseUrl: model.baseUrl === providerConfig.baseUrl ? undefined : model.baseUrl,
+				reasoning: model.reasoning,
+				thinking: model.thinking,
+				input: model.input,
+				cost: model.cost,
+				supportsTools: model.supportsTools,
+				contextWindow: model.contextWindow ?? undefined,
+				maxTokens: model.maxTokens ?? undefined,
+				omitMaxOutputTokens: model.omitMaxOutputTokens,
+				compat: model.compatConfig,
+				contextPromotionTarget: model.contextPromotionTarget,
+				premiumMultiplier: model.premiumMultiplier,
+			}),
+		);
+		const configuredModels = providerConfig.models ?? [];
+		const configuredIds = new Set(configuredModels.map(model => model.id));
 		providers[provider] = {
 			...providerConfig,
-			models,
+			models: [...configuredModels, ...discoveredModels.filter(model => !configuredIds.has(model.id))],
 		};
 	}
 	return { ...config, providers };
@@ -486,6 +490,32 @@ export function startSharedCatalogAutoRefresh(opts: SharedCatalogAutoRefreshOpti
 	return () => clearInterval(timer);
 }
 
+export interface AuthBrokerShutdownHandlers {
+	done: Promise<void>;
+	shutdown(signal: NodeJS.Signals): Promise<void>;
+}
+
+export function createAuthBrokerShutdownHandlers(
+	shutdown: (signal: NodeJS.Signals) => Promise<void>,
+): AuthBrokerShutdownHandlers {
+	const done = Promise.withResolvers<void>();
+	let shuttingDown = false;
+	const runShutdown = async (signal: NodeJS.Signals): Promise<void> => {
+		if (shuttingDown) return done.promise;
+		shuttingDown = true;
+		try {
+			await shutdown(signal);
+			done.resolve();
+		} catch (error) {
+			done.reject(error);
+		}
+		return done.promise;
+	};
+	process.once("SIGINT", () => void runShutdown("SIGINT"));
+	process.once("SIGTERM", () => void runShutdown("SIGTERM"));
+	return { done: done.promise, shutdown: runShutdown };
+}
+
 async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 	// The broker is a long-running headless service: route structured logs to
 	// stdout so a process supervisor (pm2, journald, k8s) captures them, and
@@ -548,11 +578,11 @@ async function runServe(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
 		credentialDisabledUnsub();
 		await handle.close();
 	};
-	process.once("SIGINT", () => void shutdown("SIGINT"));
-	process.once("SIGTERM", () => void shutdown("SIGTERM"));
 
-	// Block forever; lifecycle is signal-driven.
-	await new Promise<never>(() => {});
+	const shutdownHandlers = createAuthBrokerShutdownHandlers(shutdown);
+
+	// Block until signal-driven shutdown finishes.
+	await shutdownHandlers.done;
 }
 
 async function runToken(flags: AuthBrokerCommandArgs["flags"]): Promise<void> {
