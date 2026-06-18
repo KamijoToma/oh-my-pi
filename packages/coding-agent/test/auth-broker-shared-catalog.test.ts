@@ -266,6 +266,7 @@ describe("auth-broker shared catalog", () => {
 								contextWindow: 123456,
 								maxTokens: 7890,
 								reasoning: true,
+								thinking: { mode: "effort", efforts: ["low", "high"], defaultLevel: "low" },
 								input: ["text", "image"],
 							},
 						],
@@ -287,6 +288,18 @@ describe("auth-broker shared catalog", () => {
 						input: ["text", "image"],
 					},
 				],
+			});
+			expect(loaded?.catalog.providers.acme.models?.[0]?.thinking?.mode).toBe("effort");
+			expect(
+				(loaded?.catalog.providers.acme.models?.[0]?.thinking?.efforts as readonly string[] | undefined)?.includes(
+					"high",
+				),
+			).toBe(true);
+			expect(loaded?.catalog.providers.acme.models?.[0]?.cost).toEqual({
+				input: 0,
+				output: 0,
+				cacheRead: 0,
+				cacheWrite: 0,
 			});
 			expect(loaded?.catalog.providers.acme).not.toHaveProperty("apiKey");
 			expect(loaded?.catalog.providers.acme).not.toHaveProperty("authHeader");

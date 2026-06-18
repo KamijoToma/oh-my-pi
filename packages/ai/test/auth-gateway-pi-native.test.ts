@@ -514,6 +514,7 @@ describe("pi-native keyless gateway dispatch", () => {
 		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
 		const storage = new AuthStorage(store);
 		await storage.reload();
+		await storage.setRuntimeApiKey("keyless-openai", "must-not-leak");
 		let receivedAuthorization: string | null = null;
 		const upstream = Bun.serve({
 			hostname: "127.0.0.1",

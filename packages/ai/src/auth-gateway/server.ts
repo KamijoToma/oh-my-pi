@@ -489,16 +489,18 @@ async function handleFormatEndpoint(
 	// For OAuth providers this returns the access token (refreshed via the
 	// broker override on AuthStorage when needed).
 	let apiKey: string | undefined;
-	try {
-		apiKey = await bootOpts.storage.getApiKey(model.provider, sessionId, {
-			modelId: model.id,
-			signal: controller.signal,
-		});
-	} catch (error) {
-		if (controller.signal.aborted) return clientClosedResponse(route);
-		const classified = classifyGatewayError(error);
-		logger.warn("auth-gateway getApiKey threw", { provider: model.provider, peer, error: classified.message });
-		return route.module.formatError(classified.status, classified.type, classified.message);
+	if (!isKeylessGatewayModel(model)) {
+		try {
+			apiKey = await bootOpts.storage.getApiKey(model.provider, sessionId, {
+				modelId: model.id,
+				signal: controller.signal,
+			});
+		} catch (error) {
+			if (controller.signal.aborted) return clientClosedResponse(route);
+			const classified = classifyGatewayError(error);
+			logger.warn("auth-gateway getApiKey threw", { provider: model.provider, peer, error: classified.message });
+			return route.module.formatError(classified.status, classified.type, classified.message);
+		}
 	}
 	if (controller.signal.aborted) return clientClosedResponse(route);
 	const streamOpts = buildStreamOptions(parsed, model.api, controller.signal);
@@ -646,16 +648,18 @@ async function handlePiNative(bootOpts: AuthGatewayBootOptions, req: Request, pe
 	parsed.options.sessionId ??= sessionId;
 
 	let apiKey: string | undefined;
-	try {
-		apiKey = await bootOpts.storage.getApiKey(model.provider, sessionId, {
-			modelId: model.id,
-			signal: controller.signal,
-		});
-	} catch (error) {
-		if (controller.signal.aborted) return aborted();
-		const classified = classifyGatewayError(error);
-		logger.warn("auth-gateway getApiKey threw", { provider: model.provider, peer, error: classified.message });
-		return piNative.formatError(classified.status, classified.type, classified.message);
+	if (!isKeylessGatewayModel(model)) {
+		try {
+			apiKey = await bootOpts.storage.getApiKey(model.provider, sessionId, {
+				modelId: model.id,
+				signal: controller.signal,
+			});
+		} catch (error) {
+			if (controller.signal.aborted) return aborted();
+			const classified = classifyGatewayError(error);
+			logger.warn("auth-gateway getApiKey threw", { provider: model.provider, peer, error: classified.message });
+			return piNative.formatError(classified.status, classified.type, classified.message);
+		}
 	}
 	if (controller.signal.aborted) return aborted();
 	if (!apiKey && !isKeylessGatewayModel(model)) {
