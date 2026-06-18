@@ -108,6 +108,8 @@
 
 ### Changed
 
+- Extracted custom model builder helpers from `ModelRegistry` for reuse by broker-served catalog code.
+
 - Changed google-antigravity usage report lookups to honor the selected antigravity endpoint mode when resolving the reporting base URL
 - Changed context usage reporting to always return numeric token counts and percentages, so status-line and footer now show estimated values instead of `?` immediately after compaction
 - Changed context usage reporting to use anchored snapshots and pending-prompts estimates, which now keeps `/context`, status line, and model selector token counts in sync
