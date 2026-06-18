@@ -1,3 +1,4 @@
+export * from "./catalog-cache";
 export * from "./client";
 export * from "./refresher";
 export * from "./remote-store";

@@ -218,94 +218,93 @@ export const usageResponseSchema = type({
 
 // ─── Catalog ────────────────────────────────────────────────────────────────
 
-const effortSchema = z.enum(["minimal", "low", "medium", "high", "xhigh"]);
-const thinkingConfigSchema = z
-	.object({
-		mode: z.string(),
-		efforts: z.array(effortSchema).min(1),
-		defaultLevel: effortSchema.optional(),
-		effortMap: z.record(z.string(), z.string()).optional(),
-		supportsDisplay: z.boolean().optional(),
-		effortRouting: z.record(z.string(), z.string()).optional(),
-		effortBudgets: z.record(z.string(), z.number()).optional(),
-		suppressWhenOff: z.boolean().optional(),
-		requiresEffort: z.boolean().optional(),
-	})
-	.loose();
+const effortSchema = type("'minimal' | 'low' | 'medium' | 'high' | 'xhigh'");
+const thinkingConfigSchema = type({
+	mode: "string",
+	"efforts?": effortSchema.array(),
+	"defaultLevel?": effortSchema,
+	"effortMap?": { "[string]": "string" },
+	"supportsDisplay?": "boolean",
+	"effortRouting?": { "[string]": "string" },
+	"effortBudgets?": { "[string]": "number" },
+	"suppressWhenOff?": "boolean",
+	"requiresEffort?": "boolean",
+});
 
-const modelCostSchema = z
-	.object({
-		input: z.number().optional(),
-		output: z.number().optional(),
-		cacheRead: z.number().optional(),
-		cacheWrite: z.number().optional(),
-	})
-	.loose();
+const modelCostSchema = type({
+	"input?": "number",
+	"output?": "number",
+	"cacheRead?": "number",
+	"cacheWrite?": "number",
+});
 
-const modelPatchSchema = z
-	.object({
-		name: z.string().optional(),
-		api: z.string().optional(),
-		baseUrl: z.string().optional(),
-		reasoning: z.boolean().optional(),
-		input: z.array(z.enum(["text", "image"])).optional(),
-		supportsTools: z.boolean().optional(),
-		cost: modelCostSchema.optional(),
-		premiumMultiplier: z.number().optional(),
-		contextWindow: z.number().nullable().optional(),
-		maxTokens: z.number().nullable().optional(),
-		omitMaxOutputTokens: z.boolean().optional(),
-		headers: z.record(z.string(), z.string()).optional(),
-		compat: z.record(z.string(), z.unknown()).optional(),
-		contextPromotionTarget: z.string().optional(),
-		thinking: thinkingConfigSchema.optional(),
-	})
-	.loose();
+const modelPatchSchema = type({
+	"name?": "string",
+	"api?": "string",
+	"baseUrl?": "string",
+	"reasoning?": "boolean",
+	"input?": '("text" | "image")[]',
+	"supportsTools?": "boolean",
+	"cost?": modelCostSchema,
+	"premiumMultiplier?": "number",
+	"contextWindow?": "number | null",
+	"maxTokens?": "number | null",
+	"omitMaxOutputTokens?": "boolean",
+	"headers?": { "[string]": "string" },
+	"compat?": { "[string]": "unknown" },
+	"contextPromotionTarget?": "string",
+	"thinking?": thinkingConfigSchema,
+});
 
-export const sanitizedModelDefinitionSchema = modelPatchSchema
-	.extend({
-		id: z.string().min(1),
-	})
-	.loose();
+export const sanitizedModelDefinitionSchema = type({
+	id: type("string").atLeastLength(1),
+	"name?": "string",
+	"api?": "string",
+	"baseUrl?": "string",
+	"reasoning?": "boolean",
+	"input?": '("text" | "image")[]',
+	"supportsTools?": "boolean",
+	"cost?": modelCostSchema,
+	"premiumMultiplier?": "number",
+	"contextWindow?": "number | null",
+	"maxTokens?": "number | null",
+	"omitMaxOutputTokens?": "boolean",
+	"headers?": { "[string]": "string" },
+	"compat?": { "[string]": "unknown" },
+	"contextPromotionTarget?": "string",
+	"thinking?": thinkingConfigSchema,
+});
 
-export const sanitizedModelOverrideSchema = modelPatchSchema.loose();
+export const sanitizedModelOverrideSchema = modelPatchSchema;
 
-export const sanitizedProviderConfigSchema = z
-	.object({
-		baseUrl: z.string().optional(),
-		api: z.string().optional(),
-		headers: z.record(z.string(), z.string()).optional(),
-		authHeader: z.literal(false).optional(),
-		auth: z.enum(["apiKey", "none", "oauth"]).optional(),
-		discovery: z
-			.object({
-				type: z.string(),
-			})
-			.loose()
-			.optional(),
-		models: z.array(sanitizedModelDefinitionSchema).optional(),
-		modelOverrides: z.record(z.string(), sanitizedModelOverrideSchema).optional(),
-		disableStrictTools: z.boolean().optional(),
-		compat: z.record(z.string(), z.unknown()).optional(),
-	})
-	.loose()
-	.refine(value => !("apiKey" in value), { message: "catalog provider config must not include apiKey" })
-	.refine(value => !("transport" in value), { message: "catalog provider config must not include transport" });
+export const sanitizedProviderConfigSchema = type({
+	"baseUrl?": "string",
+	"api?": "string",
+	"headers?": { "[string]": "string" },
+	"authHeader?": "false",
+	"auth?": "'apiKey' | 'none' | 'oauth'",
+	"discovery?": {
+		type: "string",
+	},
+	"models?": sanitizedModelDefinitionSchema.array(),
+	"modelOverrides?": { "[string]": sanitizedModelOverrideSchema },
+	"disableStrictTools?": "boolean",
+	"compat?": { "[string]": "unknown" },
+}).narrow((value, ctx) => {
+	if ("apiKey" in value) return ctx.mustBe("not include apiKey");
+	if ("transport" in value) return ctx.mustBe("not include transport");
+	return true;
+});
 
-export const modelsConfigResponseSchema = z
-	.object({
-		generatedAt: z.number(),
-		schemaVersion: z.literal(1),
-		providers: z.record(z.string(), sanitizedProviderConfigSchema),
-		equivalence: z
-			.object({
-				overrides: z.record(z.string(), z.string()).optional(),
-				exclude: z.array(z.string()).optional(),
-			})
-			.loose()
-			.optional(),
-	})
-	.loose();
+export const modelsConfigResponseSchema = type({
+	generatedAt: "number",
+	schemaVersion: "1",
+	providers: { "[string]": sanitizedProviderConfigSchema },
+	"equivalence?": {
+		"overrides?": { "[string]": "string" },
+		"exclude?": "string[]",
+	},
+});
 
 // ─── Refresh ───────────────────────────────────────────────────────────────
 

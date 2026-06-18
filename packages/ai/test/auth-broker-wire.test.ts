@@ -13,6 +13,7 @@ import {
 	startAuthBroker,
 } from "@oh-my-pi/pi-ai/auth-broker";
 import { modelsConfigResponseSchema } from "@oh-my-pi/pi-ai/auth-broker/wire-schemas";
+import { type } from "arktype";
 import * as oauthUtils from "@oh-my-pi/pi-ai/registry/oauth";
 
 const ANTHROPIC_ENV = ["ANTHROPIC_API_KEY", "ANTHROPIC_OAUTH_TOKEN"] as const;
@@ -332,7 +333,7 @@ describe("auth-broker wire surface", () => {
 	});
 
 	test("catalog response schema rejects credential-bearing provider config", () => {
-		const parsed = modelsConfigResponseSchema.safeParse({
+		const parsed = modelsConfigResponseSchema({
 			generatedAt: 1,
 			schemaVersion: 1,
 			providers: {
@@ -343,7 +344,7 @@ describe("auth-broker wire surface", () => {
 			},
 		});
 
-		expect(parsed.success).toBe(false);
+		expect(parsed instanceof type.errors).toBe(true);
 	});
 
 	test("GET /v1/snapshot/stream requires bearer", async () => {

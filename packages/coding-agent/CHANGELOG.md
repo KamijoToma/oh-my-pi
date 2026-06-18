@@ -95,6 +95,7 @@
 ### Added
 
 - Added auth-broker shared catalog loading from `models-shared.yml`, including broker-side API-key resolution, fail-closed secret validation, and sanitized catalog serving hooks.
+- Added auth-gateway broker catalog consumption, including opt-in trust settings, broker-served custom model indexing, hot catalog rebuilds, and keyless custom-provider routing.
 
 ## [16.0.5] - 2026-06-17
 

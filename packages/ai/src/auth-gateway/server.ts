@@ -42,6 +42,11 @@ import { DEFAULT_AUTH_GATEWAY_BIND } from "./types";
 // ParsedFormatRequest / ParsedFormatOptions / FormatModule come from ./types.
 
 export type ModelResolver = (modelId: string) => Model<Api> | undefined;
+type GatewayModel = Model<Api> & { auth?: "none" };
+
+function isKeylessGatewayModel(model: Model<Api>): boolean {
+	return (model as GatewayModel).auth === "none";
+}
 
 export interface AuthGatewayBootOptions extends AuthGatewayServerOptions {
 	/** Source of credentials. Caller wires this to a broker-backed AuthStorage. */
@@ -496,24 +501,25 @@ async function handleFormatEndpoint(
 		return route.module.formatError(classified.status, classified.type, classified.message);
 	}
 	if (controller.signal.aborted) return clientClosedResponse(route);
-	if (!apiKey) {
+	const streamOpts = buildStreamOptions(parsed, model.api, controller.signal);
+	if (!apiKey && !isKeylessGatewayModel(model)) {
 		return route.module.formatError(
 			401,
 			"authentication_error",
 			`No credential available for provider ${model.provider}`,
 		);
 	}
-
-	const streamOpts = buildStreamOptions(parsed, model.api, controller.signal);
-	streamOpts.apiKey = buildGatewayApiKeyResolver(
-		bootOpts.storage,
-		model,
-		sessionId,
-		apiKey,
-		controller.signal,
-		route.label,
-		peer,
-	);
+	if (apiKey) {
+		streamOpts.apiKey = buildGatewayApiKeyResolver(
+			bootOpts.storage,
+			model,
+			sessionId,
+			apiKey,
+			controller.signal,
+			route.label,
+			peer,
+		);
+	}
 
 	logger.info("auth-gateway request", {
 		format: route.label,
@@ -652,7 +658,7 @@ async function handlePiNative(bootOpts: AuthGatewayBootOptions, req: Request, pe
 		return piNative.formatError(classified.status, classified.type, classified.message);
 	}
 	if (controller.signal.aborted) return aborted();
-	if (!apiKey) {
+	if (!apiKey && !isKeylessGatewayModel(model)) {
 		return piNative.formatError(
 			401,
 			"authentication_error",
@@ -664,16 +670,18 @@ async function handlePiNative(bootOpts: AuthGatewayBootOptions, req: Request, pe
 	// trust the client's options (already allow-listed by `parseRequest`) and
 	// only inject server-controlled fields. The codex temperature/topP strip
 	// matches `buildStreamOptions` — Codex rejects them with a 400.
-	const streamOpts: SimpleStreamOptions = { ...parsed.options, apiKey, signal: controller.signal };
-	streamOpts.apiKey = buildGatewayApiKeyResolver(
-		bootOpts.storage,
-		model,
-		sessionId,
-		apiKey,
-		controller.signal,
-		"pi-native",
-		peer,
-	);
+	const streamOpts: SimpleStreamOptions = { ...parsed.options, signal: controller.signal };
+	if (apiKey) {
+		streamOpts.apiKey = buildGatewayApiKeyResolver(
+			bootOpts.storage,
+			model,
+			sessionId,
+			apiKey,
+			controller.signal,
+			"pi-native",
+			peer,
+		);
+	}
 	if (model.api === "openai-codex-responses") {
 		delete streamOpts.temperature;
 		delete streamOpts.topP;
