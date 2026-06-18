@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Extracted custom model builder helpers from `ModelRegistry` for reuse by broker-served catalog code.
+
 ## [16.0.5] - 2026-06-17
 
 ### Added
