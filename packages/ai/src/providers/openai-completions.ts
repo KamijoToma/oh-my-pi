@@ -1249,7 +1249,7 @@ function createRequestSetup(
 	const apiVersion = $env.AZURE_OPENAI_API_VERSION || "2024-10-21";
 	const deploymentName = parseAzureDeploymentNameMap($env.AZURE_OPENAI_DEPLOYMENT_NAME_MAP).get(model.id) ?? model.id;
 	const setup = resolveOpenAIRequestSetup(model, {
-		apiKey,
+		apiKey: keyless ? "unused-keyless-api-key" : apiKey,
 		extraHeaders,
 		initiatorOverride,
 		messages: context.messages,
