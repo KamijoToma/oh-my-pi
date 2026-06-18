@@ -425,6 +425,26 @@ async function fetchBrokerCatalogIfEnabled(
 	return fetchBrokerCatalogWithCache(client, brokerConfig, cachePath);
 }
 
+export interface GatewayCatalogRefreshStore {
+	readonly snapshot: SnapshotResponse;
+	refreshSnapshot(): Promise<SnapshotResponse>;
+}
+
+export interface GatewayCatalogRefreshOptions {
+	catalogConfig: GatewayCatalogConfig;
+	store: GatewayCatalogRefreshStore;
+	fetchCatalog: () => Promise<ModelsConfigResponse>;
+	onCatalog: (catalog: ModelsConfigResponse) => void;
+	onModelIndex: (index: GatewayModelIndex) => void;
+}
+
+export async function refreshGatewayCatalogIndex(opts: GatewayCatalogRefreshOptions): Promise<void> {
+	if (!opts.catalogConfig.enabled) return;
+	const [catalog, snapshot] = await Promise.all([opts.fetchCatalog(), opts.store.refreshSnapshot()]);
+	opts.onCatalog(catalog);
+	opts.onModelIndex(buildGatewayModelIndex(snapshot, catalog, opts.catalogConfig));
+}
+
 async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	const brokerConfig = await resolveAuthBrokerConfig();
 	if (!brokerConfig) {
@@ -448,9 +468,17 @@ async function runServe(flags: AuthGatewayCommandArgs["flags"]): Promise<void> {
 	let modelIndex = buildGatewayModelIndex(initialSnapshot, currentCatalog, catalogConfig);
 	let store: RemoteAuthCredentialStore;
 	const refreshCatalog = async (): Promise<void> => {
-		if (!catalogConfig.enabled) return;
-		currentCatalog = await fetchBrokerCatalogWithCache(client, brokerConfig, catalogCachePath);
-		modelIndex = buildGatewayModelIndex(store.snapshot, currentCatalog, catalogConfig);
+		await refreshGatewayCatalogIndex({
+			catalogConfig,
+			store,
+			fetchCatalog: () => fetchBrokerCatalogWithCache(client, brokerConfig, catalogCachePath),
+			onCatalog: catalog => {
+				currentCatalog = catalog;
+			},
+			onModelIndex: index => {
+				modelIndex = index;
+			},
+		});
 	};
 	store = new RemoteAuthCredentialStore({
 		client,

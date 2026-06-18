@@ -3,6 +3,7 @@ import type { ModelsConfigResponse, SnapshotResponse } from "@oh-my-pi/pi-ai";
 import {
 	buildGatewayModelIndex,
 	isGatewayCatalogBaseUrlAllowed,
+	refreshGatewayCatalogIndex,
 	startGatewayCatalogPolling,
 } from "@oh-my-pi/pi-coding-agent/cli/auth-gateway-cli";
 
@@ -150,6 +151,42 @@ describe("auth-gateway broker-served catalog", () => {
 			false,
 		);
 	});
+});
+
+test("catalog refresh rebuilds against a freshly fetched credential snapshot", async () => {
+	let refreshed = false;
+	let rebuiltIds: string[] = [];
+	let capturedCatalog: ModelsConfigResponse | undefined;
+	await refreshGatewayCatalogIndex({
+		catalogConfig: { enabled: true, allowedBaseUrls: [] },
+		store: {
+			get snapshot() {
+				return snapshot([]);
+			},
+			async refreshSnapshot() {
+				refreshed = true;
+				return snapshot(["acme"]);
+			},
+		},
+		fetchCatalog: async () =>
+			catalog({
+				acme: {
+					baseUrl: "https://acme.example/v1",
+					api: "openai-completions",
+					models: [{ id: "new-model" }],
+				},
+			}),
+		onCatalog: catalog => {
+			capturedCatalog = catalog;
+		},
+		onModelIndex: index => {
+			rebuiltIds = [...index.byId.keys()];
+		},
+	});
+
+	expect(refreshed).toBe(true);
+	expect(capturedCatalog?.providers.acme.models?.map(model => model.id)).toEqual(["new-model"]);
+	expect(rebuiltIds).toContain("acme/new-model");
 });
 
 describe("auth-gateway catalog polling", () => {
