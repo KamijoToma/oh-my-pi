@@ -69,6 +69,7 @@ export interface AuthBrokerServerHandle {
 	url: string;
 	port: number;
 	hostname: string;
+	emitCatalogChanged(generatedAt: number): void;
 	close(): Promise<void>;
 }
 
@@ -689,6 +690,7 @@ export function startAuthBroker(opts: AuthBrokerServerOptions): AuthBrokerServer
 		url: `http://${boundHost}:${boundPort}`,
 		port: boundPort,
 		hostname: boundHost,
+		emitCatalogChanged,
 		close: async () => {
 			catalogListeners.clear();
 			refresher?.stop();

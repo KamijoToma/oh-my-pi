@@ -332,6 +332,36 @@ describe("auth-broker wire surface", () => {
 		}
 	});
 
+	test("server handle can emit catalog-changed for background reloads", async () => {
+		const localStore = await SqliteAuthCredentialStore.open(path.join(tempDir, "catalog-background-reload.db"));
+		const localStorage = new AuthStorage(localStore);
+		await localStorage.reload();
+		const localHandle = startAuthBroker({
+			storage: localStorage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [token],
+			disableRefresher: true,
+			getSharedCatalog: () => ({ generatedAt: 500, schemaVersion: 1, providers: {} }),
+		});
+		const controller = new AbortController();
+		const client = new AuthBrokerClient({ url: localHandle.url, token });
+		const iter = client.openSnapshotStream({ signal: controller.signal });
+		try {
+			const first = await iter.next();
+			if (first.done) throw new Error("expected snapshot frame");
+
+			localHandle.emitCatalogChanged(501);
+			const event = await nextMatching(iter, value => value.kind === "catalog-changed");
+			expect(event).toEqual({ kind: "catalog-changed", generatedAt: 501 });
+		} finally {
+			controller.abort();
+			await iter.return(undefined).catch(() => {});
+			await localHandle.close();
+			localStorage.close();
+			localStore.close();
+		}
+	});
+
 	test("catalog response schema rejects credential-bearing provider config", () => {
 		const parsed = modelsConfigResponseSchema({
 			generatedAt: 1,
