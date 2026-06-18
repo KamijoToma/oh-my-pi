@@ -113,6 +113,7 @@
 ### Changed
 
 - Extracted custom model builder helpers from `ModelRegistry` for reuse by broker-served catalog code.
+- Changed proxy model discovery to preserve OMP metadata returned by broker-backed gateways, including context window, output limit, reasoning, input modes, costs, and tool support.
 
 - Changed google-antigravity usage report lookups to honor the selected antigravity endpoint mode when resolving the reporting base URL
 - Changed context usage reporting to always return numeric token counts and percentages, so status-line and footer now show estimated values instead of `?` immediately after compaction
