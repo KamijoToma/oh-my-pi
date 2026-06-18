@@ -565,7 +565,7 @@ export const streamOpenAICompletions: StreamFunction<"openai-completions"> = (
 		let finishOpenBlocksOnError: () => void = () => {};
 
 		try {
-			const apiKey = options?.apiKey || getEnvApiKey(model.provider) || "";
+			const apiKey = options?.apiKey || (model.auth === "none" ? "" : getEnvApiKey(model.provider) || "");
 			const idleTimeoutFallbackMs = model.compat.streamIdleTimeoutMs;
 			const idleTimeoutMs = options?.streamIdleTimeoutMs ?? getOpenAIStreamIdleTimeoutMs(idleTimeoutFallbackMs);
 			const firstEventTimeoutMs =
@@ -1245,6 +1245,7 @@ function createRequestSetup(
 	extraHeaders?: Record<string, string>,
 	initiatorOverride?: MessageAttribution,
 ): OpenAIRequestSetup & { baseUrl: string } {
+	const keyless = model.auth === "none";
 	const apiVersion = $env.AZURE_OPENAI_API_VERSION || "2024-10-21";
 	const deploymentName = parseAzureDeploymentNameMap($env.AZURE_OPENAI_DEPLOYMENT_NAME_MAP).get(model.id) ?? model.id;
 	const setup = resolveOpenAIRequestSetup(model, {
@@ -1257,11 +1258,14 @@ function createRequestSetup(
 		// attribution headers prepended before caller headers. Kept here (not in
 		// the shared helper) because it is provider-specific request setup.
 		prependHeaders: model.provider === "kimi-code" ? getKimiCommonHeaders : undefined,
-		alibabaCodingPlanAuth: true,
+		alibabaCodingPlanAuth: !keyless,
 		azureChatCompletions: { apiVersion, deploymentName },
 	});
 	if (!setup.baseUrl) {
 		throw new Error("OpenAI request setup did not resolve a base URL");
+	}
+	if (keyless) {
+		delete setup.headers.Authorization;
 	}
 	return setup as OpenAIRequestSetup & { baseUrl: string };
 }

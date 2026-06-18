@@ -269,8 +269,8 @@ function streamDispatch<TApi extends Api>(
 		);
 	}
 
-	const apiKey = requestOptions?.apiKey || getEnvApiKey(model.provider);
-	if (!apiKey) {
+	const apiKey = requestOptions?.apiKey || (model.auth === "none" ? undefined : getEnvApiKey(model.provider));
+	if (!apiKey && model.auth !== "none") {
 		throw new Error(`No API key for provider: ${model.provider}`);
 	}
 	const providerOptions = isGoogleVertexAuthenticatedModel(model)
@@ -525,8 +525,9 @@ export function streamSimple<TApi extends Api>(
 	// The resolver form is handled by the wrapper above; only a static string
 	// key reaches this point.
 	const apiKey =
-		(typeof requestOptions?.apiKey === "string" ? requestOptions.apiKey : undefined) || getEnvApiKey(model.provider);
-	if (!apiKey) {
+		(typeof requestOptions?.apiKey === "string" ? requestOptions.apiKey : undefined) ||
+		(model.auth === "none" ? undefined : getEnvApiKey(model.provider));
+	if (!apiKey && model.auth !== "none") {
 		throw new Error(`No API key for provider: ${model.provider}`);
 	}
 

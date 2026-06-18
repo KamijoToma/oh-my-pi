@@ -339,6 +339,67 @@ describe("pi-native keyless gateway dispatch", () => {
 			await fs.rm(tempDir, { recursive: true, force: true });
 		}
 	});
+
+	it("allows auth:none OpenAI-compatible models without broker credentials", async () => {
+		const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auth-gateway-keyless-openai-"));
+		const store = await SqliteAuthCredentialStore.open(path.join(tempDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		let receivedAuthorization: string | null = null;
+		const upstream = Bun.serve({
+			hostname: "127.0.0.1",
+			port: 0,
+			fetch: async request => {
+				receivedAuthorization = request.headers.get("authorization");
+				return new Response(
+					[
+						'data: {"id":"chatcmpl-test","choices":[{"index":0,"delta":{"content":"ok"}}]}',
+						'data: {"id":"chatcmpl-test","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}',
+						"data: [DONE]",
+						"",
+					].join("\n\n"),
+					{ headers: { "Content-Type": "text/event-stream" } },
+				);
+			},
+		});
+		const handle = startAuthGateway({
+			storage,
+			bind: "127.0.0.1:0",
+			bearerTokens: [],
+			resolveModel: () => ({
+				...buildModel({
+					id: "free-chat",
+					name: "Free Chat",
+					provider: "keyless-openai",
+					api: "openai-completions",
+					baseUrl: `http://127.0.0.1:${upstream.port}/v1`,
+					reasoning: false,
+					input: ["text"],
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+					contextWindow: 128000,
+					maxTokens: 16384,
+				}),
+				auth: "none" as const,
+			}),
+		});
+		try {
+			const res = await fetch(`${handle.url}/v1/pi/stream`, {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify({ modelId: "keyless-openai/free-chat", context: baseContext, stream: false }),
+			});
+			expect(res.status).toBe(200);
+			const body = (await res.json()) as { message: { content: unknown } };
+			expect(body.message.content).toEqual([{ type: "text", text: "ok" }]);
+			expect(receivedAuthorization).toBeNull();
+		} finally {
+			await handle.close();
+			upstream.stop(true);
+			storage.close();
+			store.close();
+			await fs.rm(tempDir, { recursive: true, force: true });
+		}
+	});
 });
 
 describe("pi-native formatError", () => {

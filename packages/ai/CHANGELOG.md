@@ -71,6 +71,7 @@
 ### Fixed
 
 - Fixed auth-broker snapshot stream clients to ignore unknown future events after the initial snapshot while still surfacing `catalog-changed` events.
+- Fixed broker-catalog `auth: none` OpenAI-compatible models so gateway requests do not require or inject API keys.
 
 ## [16.0.5] - 2026-06-17
 
