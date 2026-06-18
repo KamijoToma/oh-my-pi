@@ -1,4 +1,4 @@
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "bun:test";
 import type { AssistantMessage } from "@oh-my-pi/pi-ai";
 import { resetSettingsForTest, Settings } from "@oh-my-pi/pi-coding-agent/config/settings";
 import { AssistantMessageComponent } from "@oh-my-pi/pi-coding-agent/modes/components/assistant-message";
@@ -50,6 +50,9 @@ beforeEach(async () => {
 afterEach(() => {
 	resetSettingsForTest();
 	setTerminalImageProtocol(originalImageProtocol);
+	// Bun:test fake timers leak if a test fails before calling useRealTimers();
+	// restore real timers unconditionally to keep the rest of the suite safe.
+	vi.useRealTimers();
 });
 
 describe("AssistantMessageComponent error rendering", () => {
@@ -126,9 +129,9 @@ describe("AssistantMessageComponent hidden thinking rendering", () => {
 		};
 	}
 
-	it("omits hidden thinking instead of rendering a placeholder", () => {
+	it("renders a placeholder for hidden thinking instead of the reasoning text", () => {
 		const lines = renderLines(thinkingMessage(), true);
-		expect(lines.some(line => line.includes("Thinking..."))).toBe(false);
+		expect(lines.some(line => line.includes("thinking"))).toBe(true);
 		expect(lines.some(line => line.includes("private reasoning"))).toBe(false);
 		expect(lines.some(line => line.includes("Visible answer"))).toBe(true);
 	});
@@ -137,9 +140,27 @@ describe("AssistantMessageComponent hidden thinking rendering", () => {
 		const lines = renderLines(thinkingMessage());
 		expect(lines.some(line => line.includes("private reasoning"))).toBe(true);
 	});
+
+	it("retains the duration placeholder when a finalized visible message is collapsed", () => {
+		vi.useFakeTimers();
+		const component = new AssistantMessageComponent(thinkingMessage(), false);
+		const message = thinkingMessage();
+		component.updateContent(message);
+		vi.advanceTimersByTime(2500);
+		component.markTranscriptBlockFinalized();
+		expect(Bun.stripANSI(component.render(RENDER_WIDTH).join("\n")).includes("private reasoning")).toBe(true);
+
+		component.setHideThinkingBlock(true);
+		component.updateContent(message);
+		const collapsed = Bun.stripANSI(component.render(RENDER_WIDTH).join("\n"));
+		expect(collapsed.includes("think for")).toBe(true);
+		expect(collapsed.includes("private reasoning")).toBe(false);
+		component.dispose();
+		vi.useRealTimers();
+	});
 });
 
-describe("AssistantMessageComponent streaming thinking pulse", () => {
+describe("AssistantMessageComponent streaming thinking placeholder", () => {
 	// The in-flight streaming partial always carries stopReason "stop" (proxy.ts
 	// seeds it), so "still streaming" is keyed off the block not yet being
 	// finalized — a live component is constructed with no message.
@@ -173,71 +194,71 @@ describe("AssistantMessageComponent streaming thinking pulse", () => {
 		return lines;
 	}
 
-	// First frame of the breathing ▁▃▄▃ pulse; deterministic right after updateContent.
-	const PULSE = "▁";
-
-	it("shows the pulse in place of hidden reasoning while thinking streams", () => {
+	it("shows a placeholder in place of hidden reasoning while thinking streams", () => {
 		const lines = liveLines(streaming([{ type: "thinking", thinking: "private reasoning" }]));
-		expect(lines.some(line => line.includes(PULSE))).toBe(true);
+		expect(lines.some(line => line.includes("thinking"))).toBe(true);
 		expect(lines.some(line => line.includes("private reasoning"))).toBe(false);
 	});
 
-	it("drops the pulse once visible text starts streaming", () => {
+	it("shows the completed placeholder once visible text starts streaming", () => {
 		const lines = liveLines(
 			streaming([
 				{ type: "thinking", thinking: "private reasoning" },
 				{ type: "text", text: "Visible answer" },
 			]),
 		);
-		expect(lines.some(line => line.includes(PULSE))).toBe(false);
+		expect(lines.some(line => line.includes("think for"))).toBe(true);
 		expect(lines.some(line => line.includes("Visible answer"))).toBe(true);
 	});
 
-	it("does not show the pulse when thinking is visible", () => {
+	it("does not show a placeholder when thinking is visible", () => {
 		const lines = liveLines(streaming([{ type: "thinking", thinking: "private reasoning" }]), false);
-		expect(lines.some(line => line.includes(PULSE))).toBe(false);
+		expect(lines.some(line => line.includes("thinking"))).toBe(false);
 		expect(lines.some(line => line.includes("private reasoning"))).toBe(true);
 	});
 
-	it("does not show the pulse once a tool call streams", () => {
+	it("shows the completed placeholder once a tool call streams", () => {
 		const lines = liveLines(
 			streaming([
 				{ type: "thinking", thinking: "private reasoning" },
 				{ type: "toolCall", id: "t1", name: "read", arguments: { path: "x" } },
 			]),
 		);
-		expect(lines.some(line => line.includes(PULSE))).toBe(false);
+		expect(lines.some(line => line.includes("think for"))).toBe(true);
 	});
 
-	it("removes the pulse when the block is finalized", () => {
+	it("replaces the active placeholder with a duration when the block is finalized", () => {
+		vi.useFakeTimers();
 		const component = new AssistantMessageComponent(undefined, true);
 		component.updateContent(streaming([{ type: "thinking", thinking: "private reasoning" }]));
-		expect(Bun.stripANSI(component.render(RENDER_WIDTH).join("\n")).includes(PULSE)).toBe(true);
+		const beforeFinalize = Bun.stripANSI(component.render(RENDER_WIDTH).join("\n"));
+		expect(beforeFinalize.includes("thinking")).toBe(true);
+		expect(beforeFinalize.includes("private reasoning")).toBe(false);
 
+		vi.advanceTimersByTime(500);
 		component.markTranscriptBlockFinalized();
 		const afterFinalize = Bun.stripANSI(component.render(RENDER_WIDTH).join("\n"));
-		expect(afterFinalize.includes(PULSE)).toBe(false);
+		expect(afterFinalize.includes("think for 1s")).toBe(true);
 		expect(afterFinalize.includes("private reasoning")).toBe(false);
 		component.dispose();
 	});
 
-	it("keeps the pulse across thinking deltas on a reused component, then yields to text", () => {
+	it("keeps the placeholder across thinking deltas on a reused component, then shows it as completed when text arrives", () => {
 		// Mirrors live streaming: one component reused across updateContent calls
-		// (the fast path early-returns on a stable shape, so the placeholder must
-		// persist) until visible text arrives and replaces it.
+		// until visible text arrives; the completed thinking placeholder stays.
 		const component = new AssistantMessageComponent(undefined, true);
 		const rendered = () => Bun.stripANSI(component.render(RENDER_WIDTH).join("\n"));
 		component.updateContent(streaming([{ type: "thinking", thinking: "a" }]));
-		expect(rendered().includes(PULSE)).toBe(true);
+		expect(rendered().includes("thinking")).toBe(true);
 		component.updateContent(streaming([{ type: "thinking", thinking: "ab" }]));
-		expect(rendered().includes(PULSE)).toBe(true);
+		expect(rendered().includes("thinking")).toBe(true);
 		component.updateContent(
 			streaming([
 				{ type: "thinking", thinking: "abc" },
 				{ type: "text", text: "Answer" },
 			]),
 		);
-		expect(rendered().includes(PULSE)).toBe(false);
+		expect(rendered().includes("think for")).toBe(true);
 		expect(rendered().includes("Answer")).toBe(true);
 		component.dispose();
 	});

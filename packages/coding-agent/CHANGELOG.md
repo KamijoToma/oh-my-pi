@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Hidden thinking blocks now render a placeholder line (`thinking...` while streaming, `think for Xs` once finalized) instead of disappearing entirely. Toggling thinking visibility with `Ctrl+T` or `--hide-thinking` expands the placeholder into the full reasoning text and collapses it back.
+
 ### Fixed
 
 - Fixed `omp update` reporting `EPERM: operation not permitted, unlink '<binary>.bak'` on Windows when self-replacing a standalone binary, even though the new binary had already been installed. The backed-up old executable is still the running process image and cannot be unlinked until the process exits, so the post-verify backup cleanup is now best-effort, backups use a unique per-attempt name, and stale backups are swept on the next update ([#845](https://github.com/can1357/oh-my-pi/issues/845)).

@@ -16,13 +16,13 @@ import { canonicalizeMessage } from "../../utils/thinking-display";
 const MAX_TRANSCRIPT_ERROR_LINES = 8;
 
 /**
- * Frames for the streaming "thinking" pulse rendered in place of a hidden
- * thinking block while the model is still producing it. A single fixed-width
- * glyph that rises ▁▃▄▃ so the indicator animates without shifting the line.
- * Advanced every {@link THINKING_DOTS_FRAME_MS}.
+ * Frames for the streaming "thinking" placeholder rendered in place of a hidden
+ * thinking block while the model is still producing it. The ellipsis cycles so
+ * the line shows activity without shifting width.
+ * Advanced every {@link THINKING_PLACEHOLDER_FRAME_MS}.
  */
-const THINKING_DOTS_FRAMES = ["▁", "▃", "▄", "▃"] as const;
-const THINKING_DOTS_FRAME_MS = 320;
+const THINKING_PLACEHOLDER_FRAMES = ["thinking.", "thinking..", "thinking..."] as const;
+const THINKING_PLACEHOLDER_FRAME_MS = 500;
 
 /**
  * Component that renders a complete assistant message
@@ -59,11 +59,13 @@ export class AssistantMessageComponent extends Container {
 	#fastPathItems:
 		| Array<{ md: Markdown; contentIndex: number; blockType: "text" | "thinking"; lastText: string }>
 		| undefined;
-	/** Live "thinking" pulse shown in place of a hidden thinking block while it
+	/** Live "thinking" placeholder shown in place of a hidden thinking block while it
 	 *  streams; undefined when not animating. Driven by {@link #thinkingDotsTimer}. */
 	#thinkingDots: Text | undefined;
 	#thinkingDotsTimer: NodeJS.Timeout | undefined;
 	#thinkingDotsFrame = 0;
+	/** Per-content-index timing for thinking blocks, used to render "think for Xs" placeholders. */
+	#thinkingTimings = new Map<number, { startTime: number; endTime?: number }>();
 
 	constructor(
 		message?: AssistantMessage,
@@ -107,32 +109,51 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	/**
-	 * Whether to render the animated "thinking" pulse in place of the suppressed
-	 * reasoning: only while this block is still streaming (not yet finalized — the
-	 * in-flight message always carries `stopReason: "stop"`, so finalization is the
-	 * only reliable live signal), thinking is hidden, no tool call has started, and
-	 * the active tail block is a thinking block (the model is reasoning right now).
-	 * Once text starts, a tool call streams, or the block is sealed, the pulse ends.
+	 * Returns the index of the thinking block that is currently streaming at the
+	 * tail of the message, or undefined when the tail is text, a tool call, or the
+	 * block has already been finalized.
 	 */
-	#shouldAnimateThinking(message: AssistantMessage): boolean {
-		if (!this.hideThinkingBlock || this.#transcriptBlockFinalized) return false;
-		let tail: "text" | "thinking" | undefined;
-		for (const content of message.content) {
-			if (content.type === "toolCall") return false;
-			if (content.type === "text" && canonicalizeMessage(content.text)) tail = "text";
-			else if (content.type === "thinking" && canonicalizeMessage(content.thinking)) tail = "thinking";
+	#activeThinkingIndex(message: AssistantMessage): number | undefined {
+		if (this.#transcriptBlockFinalized) return undefined;
+		let lastIndex: number | undefined;
+		for (let i = 0; i < message.content.length; i++) {
+			const content = message.content[i];
+			if (content.type === "toolCall") return undefined;
+			if (content.type === "text" && canonicalizeMessage(content.text)) lastIndex = undefined;
+			else if (content.type === "thinking" && canonicalizeMessage(content.thinking)) lastIndex = i;
 		}
-		return tail === "thinking";
+		return lastIndex;
 	}
 
-	#thinkingDotsLabel(): string {
-		const glyph = THINKING_DOTS_FRAMES[this.#thinkingDotsFrame % THINKING_DOTS_FRAMES.length] ?? "…";
-		return theme.fg("thinkingText", glyph);
+	#ensureThinkingTiming(index: number): { startTime: number; endTime?: number } {
+		let timing = this.#thinkingTimings.get(index);
+		if (!timing) {
+			timing = { startTime: Date.now() };
+			this.#thinkingTimings.set(index, timing);
+		}
+		return timing;
+	}
+
+	#formatThinkingDuration(ms: number): string {
+		const seconds = Math.max(1, Math.round(ms / 1000));
+		return seconds === 1 ? "1s" : `${seconds}s`;
+	}
+
+	#thinkingPlaceholderLabel(active: boolean, durationMs?: number): string {
+		if (active) {
+			const frame =
+				THINKING_PLACEHOLDER_FRAMES[this.#thinkingDotsFrame % THINKING_PLACEHOLDER_FRAMES.length] ?? "thinking...";
+			return frame;
+		}
+		if (durationMs !== undefined) {
+			return `think for ${this.#formatThinkingDuration(durationMs)}`;
+		}
+		return "thinking";
 	}
 
 	#startThinkingAnimation(): void {
 		if (this.#thinkingDotsTimer) return;
-		this.#thinkingDotsTimer = setInterval(() => this.#advanceThinkingDots(), THINKING_DOTS_FRAME_MS);
+		this.#thinkingDotsTimer = setInterval(() => this.#advanceThinkingDots(), THINKING_PLACEHOLDER_FRAME_MS);
 		this.#thinkingDotsTimer.unref?.();
 	}
 
@@ -141,8 +162,8 @@ export class AssistantMessageComponent extends Container {
 			this.#stopThinkingAnimation();
 			return;
 		}
-		this.#thinkingDotsFrame = (this.#thinkingDotsFrame + 1) % THINKING_DOTS_FRAMES.length;
-		if (this.#thinkingDots.setText(this.#thinkingDotsLabel())) {
+		this.#thinkingDotsFrame = (this.#thinkingDotsFrame + 1) % THINKING_PLACEHOLDER_FRAMES.length;
+		if (this.#thinkingDots.setText(theme.fg("thinkingText", this.#thinkingPlaceholderLabel(true)))) {
 			this.onImageUpdate?.();
 		}
 	}
@@ -178,9 +199,27 @@ export class AssistantMessageComponent extends Container {
 	markTranscriptBlockFinalized(): void {
 		this.#transcriptBlockFinalized = true;
 		this.#stopThinkingAnimation();
-		// If the live pulse was on screen when the block sealed, drop the fast path
-		// and rebuild so the placeholder is removed — finalized blocks never animate.
-		if (this.#thinkingDots) {
+		// Capture end times for every thinking block now, regardless of whether
+		// thinking is currently hidden. This ensures that toggling hide/show after
+		// the block has finalized still shows the real duration placeholder.
+		if (this.#lastMessage) {
+			for (let i = 0; i < this.#lastMessage.content.length; i++) {
+				const content = this.#lastMessage.content[i];
+				if (content.type === "thinking" && canonicalizeMessage(content.thinking)) {
+					const timing = this.#ensureThinkingTiming(i);
+					if (timing.endTime === undefined) {
+						timing.endTime = Date.now();
+					}
+				}
+			}
+		}
+		// If hidden thinking placeholders are on screen, drop the fast path and
+		// rebuild so the active "thinking..." placeholder is replaced by the final
+		// "think for Xs" line.
+		const hasHiddenThinking =
+			this.hideThinkingBlock &&
+			this.#lastMessage?.content.some(c => c.type === "thinking" && canonicalizeMessage(c.thinking));
+		if (this.#thinkingDots || hasHiddenThinking) {
 			this.#fastPathKey = undefined;
 			this.#fastPathItems = undefined;
 			if (this.#lastMessage) this.updateContent(this.#lastMessage, { transient: this.#lastUpdateTransient });
@@ -327,6 +366,10 @@ export class AssistantMessageComponent extends Container {
 	#canFastPath(message: AssistantMessage): boolean {
 		for (const content of message.content) {
 			if (content.type === "toolCall") return false;
+			// Hidden thinking placeholders mutate their text while streaming and on
+			// finalization ("thinking..." → "think for Xs"), so skip the fast path.
+			if (this.hideThinkingBlock && content.type === "thinking" && canonicalizeMessage(content.thinking))
+				return false;
 		}
 		if (this.#toolImagesByCallId.size > 0) return false;
 		if (message.stopReason === "aborted" && shouldRenderAbortReason(message.errorMessage)) return false;
@@ -410,10 +453,11 @@ export class AssistantMessageComponent extends Container {
 			| Array<{ md: Markdown; contentIndex: number; blockType: "text" | "thinking"; lastText: string }>
 			| undefined = shouldCapture ? [] : undefined;
 
+		const activeThinkingIndex = this.#activeThinkingIndex(message);
 		const hasVisibleContent = message.content.some(
 			c =>
 				(c.type === "text" && canonicalizeMessage(c.text)) ||
-				(!this.hideThinkingBlock && c.type === "thinking" && canonicalizeMessage(c.thinking)),
+				(c.type === "thinking" && canonicalizeMessage(c.thinking)),
 		);
 
 		// Render content in order
@@ -429,9 +473,14 @@ export class AssistantMessageComponent extends Container {
 				captureItems?.push({ md, contentIndex: i, blockType: "text", lastText: trimmed });
 			} else if (content.type === "thinking" && canonicalizeMessage(content.thinking)) {
 				const thinkingText = canonicalizeMessage(content.thinking);
-				if (this.hideThinkingBlock) {
-					thinkingIndex += 1;
-					continue;
+				const isActive = i === activeThinkingIndex;
+				const timing = this.#ensureThinkingTiming(i);
+				// Close timing as soon as this thinking block stops being the active tail
+				// (answer text or a tool call started streaming). Do not overwrite an already
+				// captured endTime, and do not touch it once the turn has finalized —
+				// finalization records the authoritative end time.
+				if (!isActive && timing.endTime === undefined && !this.#transcriptBlockFinalized) {
+					timing.endTime = Date.now();
 				}
 				// Add spacing only when another visible assistant content block follows.
 				// This avoids a superfluous blank line before separately-rendered tool execution blocks.
@@ -442,6 +491,22 @@ export class AssistantMessageComponent extends Container {
 							(c.type === "text" && canonicalizeMessage(c.text)) ||
 							(c.type === "thinking" && canonicalizeMessage(c.thinking)),
 					);
+
+				if (this.hideThinkingBlock) {
+					const durationMs = timing.endTime !== undefined ? timing.endTime - timing.startTime : undefined;
+					const placeholder = new Text(
+						theme.fg("thinkingText", this.#thinkingPlaceholderLabel(isActive, durationMs)),
+						1,
+						0,
+					);
+					this.#contentContainer.addChild(placeholder);
+					if (isActive) this.#thinkingDots = placeholder;
+					thinkingIndex += 1;
+					if (hasVisibleContentAfter) {
+						this.#contentContainer.addChild(new Spacer(1));
+					}
+					continue;
+				}
 
 				// Thinking traces in thinkingText color, italic
 				const md = new Markdown(thinkingText, 1, 0, getMarkdownTheme(), {
@@ -459,10 +524,7 @@ export class AssistantMessageComponent extends Container {
 			}
 		}
 
-		if (this.#shouldAnimateThinking(message)) {
-			if (hasVisibleContent) this.#contentContainer.addChild(new Spacer(1));
-			this.#thinkingDots = new Text(this.#thinkingDotsLabel(), 1, 0);
-			this.#contentContainer.addChild(this.#thinkingDots);
+		if (this.#thinkingDots) {
 			this.#startThinkingAnimation();
 		} else {
 			this.#stopThinkingAnimation();
