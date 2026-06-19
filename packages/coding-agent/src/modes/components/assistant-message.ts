@@ -462,11 +462,20 @@ export class AssistantMessageComponent extends Container {
 	}
 
 	#canFastPath(message: AssistantMessage): boolean {
-		for (const content of message.content) {
+		const activeThinkingIndex = this.#activeThinkingIndex(message);
+		for (let i = 0; i < message.content.length; i++) {
+			const content = message.content[i];
 			if (content.type === "toolCall") return false;
-			// Hidden thinking placeholders mutate their text while streaming and on
-			// finalization ("thinking..." → "think for Xs"), so skip the fast path.
-			if (this.hideThinkingBlock && content.type === "thinking" && canonicalizeMessage(content.thinking))
+			// Only an active hidden thinking placeholder mutates its text while
+			// streaming (the ellipsis animation). Once the block is no longer the
+			// active tail, its placeholder stabilizes at "think for Xs" and the
+			// fast path can keep reusing the visible text Markdown children.
+			if (
+				this.hideThinkingBlock &&
+				content.type === "thinking" &&
+				canonicalizeMessage(content.thinking) &&
+				i === activeThinkingIndex
+			)
 				return false;
 		}
 		if (this.#toolImagesByCallId.size > 0) return false;
