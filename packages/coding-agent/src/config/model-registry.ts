@@ -370,6 +370,7 @@ function applyModelPatch(base: Model<Api>, patch: ModelPatch, transport: ModelTr
 function applyModelOverride(model: Model<Api>, override: ModelOverride): Model<Api> {
 	return applyModelPatch(model, override as ModelPatch, "merge");
 }
+
 function normalizeSuppressedSelector(
 	selector: string,
 	hasLiveModel?: (provider: string, id: string) => boolean,

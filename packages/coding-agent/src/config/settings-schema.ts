@@ -344,44 +344,38 @@ export const SETTINGS_SCHEMA = {
 	},
 
 	// macOS power assertions (caffeinate flags). No-op on other platforms.
-	"power.preventIdleSleep": {
-		type: "boolean",
-		default: true,
+	"power.sleepPrevention": {
+		type: "enum",
+		values: ["off", "idle", "display", "system"] as const,
+		default: "idle",
 		ui: {
 			tab: "interaction",
 			group: "Power (macOS)",
-			label: "Prevent Idle Sleep",
-			description: "Keep the system awake while a session is open (caffeinate -i)",
-		},
-	},
-	"power.preventSystemSleep": {
-		type: "boolean",
-		default: false,
-		ui: {
-			tab: "interaction",
-			group: "Power (macOS)",
-			label: "Prevent System Sleep on AC",
-			description: "Block all system sleep while on AC power (caffeinate -s)",
-		},
-	},
-	"power.declareUserActive": {
-		type: "boolean",
-		default: false,
-		ui: {
-			tab: "interaction",
-			group: "Power (macOS)",
-			label: "Declare User Active",
-			description: "Keep the display lit and treat the user as active (caffeinate -u)",
-		},
-	},
-	"power.preventDisplaySleep": {
-		type: "boolean",
-		default: false,
-		ui: {
-			tab: "interaction",
-			group: "Power (macOS)",
-			label: "Prevent Display Sleep",
-			description: "Keep the display from idle-sleeping while a session is open (caffeinate -d)",
+			label: "Sleep Prevention",
+			description:
+				"Prevent macOS sleep during active sessions. Each level is cumulative — it adds the flags of all lower levels.",
+			options: [
+				{
+					value: "off",
+					label: "Off",
+					description: "Do not prevent any sleep",
+				},
+				{
+					value: "idle",
+					label: "Prevent Idle Sleep",
+					description: "Keep the system awake while a session is open (caffeinate -i)",
+				},
+				{
+					value: "display",
+					label: "Prevent Display Sleep",
+					description: "Also keep the display from idle-sleeping (caffeinate -i -d)",
+				},
+				{
+					value: "system",
+					label: "Prevent System Sleep",
+					description: "Also block all system sleep on AC and declare the user active (caffeinate -i -d -s -u)",
+				},
+			],
 		},
 	},
 	"advisor.enabled": {
@@ -403,6 +397,7 @@ export const SETTINGS_SCHEMA = {
 			group: "Advisor",
 			label: "Advisor for Subagents",
 			description: "Also enable the advisor on spawned task/eval subagents.",
+			condition: "advisorEnabled",
 		},
 	},
 	"advisor.syncBacklog": {
@@ -415,6 +410,7 @@ export const SETTINGS_SCHEMA = {
 			label: "Advisor Sync Backlog",
 			description:
 				"Pause the main agent for up to 30 seconds if the advisor falls behind by this many turns. Off disables catch-up delays.",
+			condition: "advisorEnabled",
 		},
 	},
 	"advisor.immuneTurns": {
@@ -434,6 +430,7 @@ export const SETTINGS_SCHEMA = {
 				{ value: "4", label: "4 turns" },
 				{ value: "5", label: "5 turns" },
 			],
+			condition: "advisorEnabled",
 		},
 	},
 	shellPath: { type: "string", default: undefined },
@@ -811,11 +808,6 @@ export const SETTINGS_SCHEMA = {
 			description: "Remove the 1-character horizontal padding from the left and right of the terminal output",
 		},
 	},
-	// Display rendering
-	"display.tabWidth": {
-		type: "number",
-		default: 3,
-	},
 
 	"display.shimmer": {
 		type: "enum",
@@ -856,6 +848,17 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"display.cacheMissMarker": {
+		type: "boolean",
+		default: false,
+		ui: {
+			tab: "appearance",
+			group: "Display",
+			label: "Cache Miss Marker",
+			description: "Show a divider above an assistant turn whose request lost (missed) the prompt cache",
+		},
+	},
+
 	showHardwareCursor: {
 		type: "boolean",
 		default: true, // will be computed based on platform if undefined
@@ -874,7 +877,7 @@ export const SETTINGS_SCHEMA = {
 	// Reasoning and prompts
 	defaultThinkingLevel: {
 		type: "enum",
-		values: [...THINKING_EFFORTS, AUTO_THINKING],
+		values: [...THINKING_EFFORTS, AUTO_THINKING, "max"],
 		default: "high",
 		ui: {
 			tab: "model",
@@ -921,14 +924,15 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
-	repeatToolDescriptions: {
+	inlineToolDescriptors: {
 		type: "boolean",
 		default: false,
 		ui: {
 			tab: "model",
 			group: "Prompt",
-			label: "Repeat Tool Descriptions",
-			description: "Render full tool descriptions in the system prompt instead of a tool name list",
+			label: "Inline Tool Descriptors",
+			description:
+				"Render full tool descriptors in the system prompt and strip top-level/nested descriptions from provider tool schemas so descriptor text is sent once",
 		},
 	},
 
@@ -1521,6 +1525,18 @@ export const SETTINGS_SCHEMA = {
 		},
 	},
 
+	"collab.webUrl": {
+		type: "string",
+		default: "",
+		ui: {
+			tab: "interaction",
+			group: "Collab",
+			label: "Web UI URL",
+			description:
+				"Browser UI used by /collab links; empty derives from collab.relayUrl; explicit http:// is localhost-only",
+		},
+	},
+
 	"collab.displayName": {
 		type: "string",
 		default: "",
@@ -1880,7 +1896,7 @@ export const SETTINGS_SCHEMA = {
 				{ value: "anthropic", label: "Anthropic", description: "Use Anthropic-style in-band tool calls." },
 				{ value: "deepseek", label: "DeepSeek", description: "Use DeepSeek-style in-band tool calls." },
 				{ value: "harmony", label: "Harmony", description: "Use Harmony-style in-band tool calls." },
-				{ value: "pi", label: "Pi", description: "Use the Pi owned dialect." },
+				{ value: "pi", label: "Pi", description: "Use the Pi owned dialect (compact sigil-delimited tool calls)." },
 				{ value: "qwen3", label: "Qwen3", description: "Use the Qwen3 owned dialect." },
 				{ value: "gemini", label: "Gemini", description: "Use the Gemini owned dialect." },
 				{ value: "gemma", label: "Gemma", description: "Use the Gemma owned dialect." },
