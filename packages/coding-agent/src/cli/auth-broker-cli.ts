@@ -166,9 +166,21 @@ function isSupportedApiKeyReference(value: string): boolean {
 	return /^[A-Z_][A-Z0-9_]*$/.test(value);
 }
 
+function isSecretHeaderName(header: string): boolean {
+	const normalized = header.toLowerCase();
+	return (
+		normalized === "authorization" ||
+		normalized === "proxy-authorization" ||
+		normalized === "api-key" ||
+		normalized === "x-api-key" ||
+		normalized === "x-auth-token" ||
+		normalized === "x-access-token"
+	);
+}
+
 function validateSharedHeaders(context: string, headers: Record<string, string> | undefined): void {
 	for (const [header, value] of Object.entries(headers ?? {})) {
-		if (isSecretReference(value)) {
+		if (isSecretHeaderName(header) || isSecretReference(value)) {
 			throw new Error(`${context} header ${header} is not allowed in broker shared catalog`);
 		}
 	}

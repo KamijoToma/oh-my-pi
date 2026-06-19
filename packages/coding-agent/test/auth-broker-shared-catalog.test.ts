@@ -100,6 +100,18 @@ describe("auth-broker shared catalog", () => {
 		).toThrow(/secret-bearing header/);
 		expect(() =>
 			validateSharedBrokerCatalog({
+				providers: {
+					acme: { baseUrl: "https://acme.example/v1", headers: { Authorization: "Basic dXNlcjpwYXNz" } },
+				},
+			}),
+		).toThrow(/secret-bearing header/);
+		expect(() =>
+			validateSharedBrokerCatalog({
+				providers: { acme: { baseUrl: "https://acme.example/v1", headers: { "X-API-Key": "short-token" } } },
+			}),
+		).toThrow(/secret-bearing header/);
+		expect(() =>
+			validateSharedBrokerCatalog({
 				providers: { acme: { baseUrl: "https://acme.example/v1", authHeader: true } },
 			}),
 		).toThrow(/authHeader/);
