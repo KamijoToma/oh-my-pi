@@ -260,6 +260,7 @@ export const sanitizedModelDefinitionSchema = type({
 	id: type("string").atLeastLength(1),
 	"name?": "string",
 	"api?": "string",
+	"requestModelId?": "string",
 	"baseUrl?": "string",
 	"reasoning?": "boolean",
 	"input?": '("text" | "image")[]',

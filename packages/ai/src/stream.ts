@@ -231,6 +231,10 @@ export function stream<TApi extends Api>(
 	return withGeminiThinkingLoopGuard(model, options, opts => streamDispatch(model, context, opts));
 }
 
+function supportsKeylessAuth(api: Api): boolean {
+	return api === "openai-completions" || api === "openai-responses";
+}
+
 function streamDispatch<TApi extends Api>(
 	model: Model<TApi>,
 	context: Context,
@@ -269,6 +273,9 @@ function streamDispatch<TApi extends Api>(
 		);
 	}
 
+	if (model.auth === "none" && !supportsKeylessAuth(model.api)) {
+		throw new Error(`API ${model.api} does not support auth:none models`);
+	}
 	const apiKey = requestOptions?.apiKey || (model.auth === "none" ? undefined : getEnvApiKey(model.provider));
 	if (!apiKey && model.auth !== "none") {
 		throw new Error(`No API key for provider: ${model.provider}`);

@@ -218,6 +218,7 @@ function sanitizeProviderConfig(providerConfig: SharedProviderConfig): ModelsCon
 function sanitizeModelDefinition(model: SharedModelDefinition): SanitizedModelDefinition {
 	const {
 		id,
+		requestModelId,
 		name,
 		api,
 		baseUrl,
@@ -236,6 +237,7 @@ function sanitizeModelDefinition(model: SharedModelDefinition): SanitizedModelDe
 	} = model;
 	return {
 		id,
+		...(requestModelId !== undefined ? { requestModelId } : {}),
 		...(name !== undefined ? { name } : {}),
 		...(api !== undefined ? { api } : {}),
 		...(baseUrl !== undefined ? { baseUrl } : {}),
@@ -375,6 +377,7 @@ async function materializeSharedCatalogDiscovery(
 				compat: model.compatConfig,
 				contextPromotionTarget: model.contextPromotionTarget,
 				premiumMultiplier: model.premiumMultiplier,
+				requestModelId: model.requestModelId,
 			}),
 		);
 		const configuredModels = providerConfig.models ?? [];
@@ -409,6 +412,39 @@ function sanitizeSharedCatalog(config: ModelsConfig, generatedAt: number): Model
 	};
 }
 
+function getBrokerOwnedCredentialsPath(sharedPath: string): string {
+	const hash = crypto.createHash("sha256").update(path.resolve(sharedPath)).digest("hex").slice(0, 16);
+	return path.join(getConfigRootDir(), `auth-broker-shared-credentials.${hash}.json`);
+}
+
+async function readBrokerOwnedCredentials(sharedPath: string): Promise<BrokerOwnedCredentialMap> {
+	try {
+		const parsed = (await Bun.file(getBrokerOwnedCredentialsPath(sharedPath)).json()) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+		const map: BrokerOwnedCredentialMap = new Map();
+		for (const [provider, ids] of Object.entries(parsed)) {
+			if (!Array.isArray(ids)) continue;
+			const numericIds = ids.filter((id): id is number => Number.isSafeInteger(id));
+			if (numericIds.length > 0) map.set(provider, new Set(numericIds));
+		}
+		return map;
+	} catch (error) {
+		if (!isEnoent(error))
+			logger.debug("auth-broker shared credential ownership unreadable", { error: String(error) });
+		return new Map();
+	}
+}
+
+async function writeBrokerOwnedCredentials(sharedPath: string, credentials: BrokerOwnedCredentialMap): Promise<void> {
+	const payload = Object.fromEntries([...credentials].map(([provider, ids]) => [provider, [...ids]]));
+	await Bun.write(getBrokerOwnedCredentialsPath(sharedPath), JSON.stringify(payload));
+}
+
+function hasBrokerOwnedCredentials(credentials: BrokerOwnedCredentialMap): boolean {
+	for (const ids of credentials.values()) if (ids.size > 0) return true;
+	return false;
+}
+
 async function removeStaleBrokerOwnedKeys(
 	storage: AuthStorage,
 	previous: BrokerOwnedCredentialMap,
@@ -431,9 +467,13 @@ export async function loadSharedBrokerCatalog(
 ): Promise<SharedBrokerCatalogLoad | undefined> {
 	const file = ModelsConfigFile.relocate(sharedPath);
 	file.invalidate();
+	const previousCredentials = hasBrokerOwnedCredentials(previousBrokerOwnedCredentials)
+		? previousBrokerOwnedCredentials
+		: await readBrokerOwnedCredentials(sharedPath);
 	const result = await file.tryLoadAsync();
 	if (result.status === "not-found") {
-		await removeStaleBrokerOwnedKeys(storage, previousBrokerOwnedCredentials, new Map());
+		await removeStaleBrokerOwnedKeys(storage, previousCredentials, new Map());
+		await writeBrokerOwnedCredentials(sharedPath, new Map());
 		return {
 			catalog: { generatedAt: Date.now(), schemaVersion: 1, providers: {} },
 			brokerOwnedCredentials: new Map(),
@@ -449,13 +489,16 @@ export async function loadSharedBrokerCatalog(
 		const resolved = resolveSharedApiKey(providerConfig.apiKey, opts);
 		if (!resolved) throw new Error(`Unable to resolve apiKey for shared provider ${provider}`);
 		resolvedApiKeys.set(provider, resolved);
+	}
+	for (const [provider, resolved] of resolvedApiKeys) {
 		const entries = storage.upsertCredential(provider, { type: "api_key", key: resolved });
 		const brokerOwnedIds = entries
 			.filter(entry => entry.credential.type === "api_key" && entry.credential.key === resolved)
 			.map(entry => entry.id);
 		brokerOwnedCredentials.set(provider, new Set(brokerOwnedIds));
 	}
-	await removeStaleBrokerOwnedKeys(storage, previousBrokerOwnedCredentials, brokerOwnedCredentials);
+	await removeStaleBrokerOwnedKeys(storage, previousCredentials, brokerOwnedCredentials);
+	await writeBrokerOwnedCredentials(sharedPath, brokerOwnedCredentials);
 	const materializedConfig = await materializeSharedCatalogDiscovery(config, resolvedApiKeys, opts);
 	return { catalog: sanitizeSharedCatalog(materializedConfig, Date.now()), brokerOwnedCredentials };
 }

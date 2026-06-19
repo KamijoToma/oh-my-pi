@@ -77,6 +77,22 @@ describe("auth-gateway broker-served catalog", () => {
 		expect(keyless ? index.models.includes(keyless) : false).toBe(true);
 	});
 
+	test("preserves broker catalog requestModelId on gateway models", () => {
+		const index = buildGatewayModelIndex(
+			snapshot(["acme"]),
+			catalog({
+				acme: {
+					baseUrl: "https://acme.example/v1",
+					api: "openai-completions",
+					models: [{ id: "display-model", requestModelId: "wire-model" }],
+				},
+			}),
+			{ enabled: true, allowedBaseUrls: [] },
+		);
+
+		expect(index.byId.get("acme/display-model")?.requestModelId).toBe("wire-model");
+	});
+
 	test("preserves provider disableStrictTools compat on catalog models", () => {
 		const index = buildGatewayModelIndex(
 			snapshot(["acme"]),

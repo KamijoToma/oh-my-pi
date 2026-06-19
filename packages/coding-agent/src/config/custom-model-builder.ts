@@ -91,6 +91,7 @@ export interface CustomModelDefinitionLike extends ModelPatch {
 	api?: Api;
 	baseUrl?: string;
 	cost?: Model<Api>["cost"];
+	requestModelId?: string;
 }
 
 export interface CustomModelBuildOptions {
@@ -103,6 +104,7 @@ export interface CustomModelOverlay extends ModelPatch {
 	api: Api;
 	baseUrl: string;
 	cost?: Model<Api>["cost"];
+	requestModelId?: string;
 	isOAuth?: boolean;
 }
 
@@ -163,6 +165,7 @@ export function buildCustomModelOverlay(
 		provider: providerName,
 		api,
 		baseUrl: modelDef.baseUrl ?? providerBaseUrl,
+		requestModelId: modelDef.requestModelId,
 		name: modelDef.name,
 		reasoning: modelDef.reasoning,
 		thinking: modelDef.thinking,
@@ -204,6 +207,7 @@ export function finalizeCustomModel(model: CustomModelOverlay, options: CustomMo
 		api: resolvedModel.api,
 		provider: resolvedModel.provider,
 		baseUrl: resolvedModel.baseUrl,
+		requestModelId: resolvedModel.requestModelId,
 		reasoning: resolvedModel.reasoning ?? reference?.reasoning ?? (options.useDefaults ? false : undefined),
 		thinking: resolvedModel.thinking ?? reference?.thinking,
 		input: input as ("text" | "image")[],

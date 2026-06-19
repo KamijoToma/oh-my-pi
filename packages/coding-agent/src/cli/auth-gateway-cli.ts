@@ -289,6 +289,7 @@ export function buildGatewayModelIndex(
 						id: modelDef.id,
 						api: modelDef.api,
 						baseUrl: modelDef.baseUrl,
+						requestModelId: modelDef.requestModelId,
 						name: modelDef.name,
 						reasoning: modelDef.reasoning,
 						thinking: modelDef.thinking,

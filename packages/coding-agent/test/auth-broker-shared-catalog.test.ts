@@ -269,6 +269,7 @@ describe("auth-broker shared catalog", () => {
 								reasoning: true,
 								thinking: { mode: "effort", efforts: ["low", "high"], defaultLevel: "low" },
 								input: ["text", "image"],
+								requestModelId: "wire-model",
 							},
 						],
 					});
@@ -302,11 +303,85 @@ describe("auth-broker shared catalog", () => {
 				cacheRead: 0,
 				cacheWrite: 0,
 			});
+			expect(loaded?.catalog.providers.acme.models?.[0]?.requestModelId).toBe("wire-model");
 			expect(loaded?.catalog.providers.acme).not.toHaveProperty("apiKey");
 			expect(loaded?.catalog.providers.acme).not.toHaveProperty("authHeader");
 		} finally {
 			storage.close();
 			store.close();
+		}
+	});
+
+	test("loadSharedBrokerCatalog resolves all shared keys before persisting any", async () => {
+		const file = path.join(agentDir, "models-shared.yml");
+		await Bun.write(
+			file,
+			[
+				"providers:",
+				"  acme:",
+				"    baseUrl: https://acme.example/v1",
+				`    apiKey: ${SECRET_ENV}`,
+				"    api: openai-completions",
+				"    models:",
+				"      - id: acme-model",
+				"  broken:",
+				"    baseUrl: https://broken.example/v1",
+				"    apiKey: MISSING_SHARED_KEY",
+				"    api: openai-completions",
+				"    models:",
+				"      - id: broken-model",
+				"",
+			].join("\n"),
+		);
+		const store = await SqliteAuthCredentialStore.open(path.join(agentDir, "agent.db"));
+		const storage = new AuthStorage(store);
+		await storage.reload();
+		try {
+			await expect(loadSharedBrokerCatalog(file, storage)).rejects.toThrow(/Unable to resolve apiKey/);
+			expect(storage.listStoredCredentials("acme")).toEqual([]);
+		} finally {
+			storage.close();
+			store.close();
+		}
+	});
+
+	test("loadSharedBrokerCatalog removes restarted broker-owned shared keys", async () => {
+		const file = path.join(agentDir, "models-shared.yml");
+		await Bun.write(
+			file,
+			[
+				"providers:",
+				"  acme:",
+				"    baseUrl: https://acme.example/v1",
+				`    apiKey: ${SECRET_ENV}`,
+				"    api: openai-completions",
+				"    models:",
+				"      - id: acme-model",
+				"",
+			].join("\n"),
+		);
+		const dbPath = path.join(agentDir, "agent.db");
+		const firstStore = await SqliteAuthCredentialStore.open(dbPath);
+		const firstStorage = new AuthStorage(firstStore);
+		await firstStorage.reload();
+		try {
+			await loadSharedBrokerCatalog(file, firstStorage);
+		} finally {
+			firstStorage.close();
+			firstStore.close();
+		}
+
+		process.env[SECRET_ENV] = "rotated-broker-key";
+		const restartedStore = await SqliteAuthCredentialStore.open(dbPath);
+		const restartedStorage = new AuthStorage(restartedStore);
+		await restartedStorage.reload();
+		try {
+			await loadSharedBrokerCatalog(file, restartedStorage, new Map());
+			const credentials = restartedStorage.listStoredCredentials("acme");
+			expect(credentials.map(entry => entry.credential)).toEqual([{ type: "api_key", key: "rotated-broker-key" }]);
+		} finally {
+			restartedStorage.close();
+			restartedStore.close();
 		}
 	});
 
