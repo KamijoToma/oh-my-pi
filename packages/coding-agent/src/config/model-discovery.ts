@@ -294,6 +294,7 @@ export async function discoverOllamaModels(
 			baseUrl: `${endpoint}/v1`,
 			reasoning: metadata?.reasoning ?? false,
 			input: metadata?.input ?? ["text"],
+			imageInputDecoder: "stb",
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 			contextWindow: metadata?.contextWindow ?? 128000,
 			maxTokens: Math.min(metadata?.contextWindow ?? Number.POSITIVE_INFINITY, DISCOVERY_DEFAULT_MAX_TOKENS),
@@ -371,6 +372,7 @@ export async function discoverLlamaCppModels(
 				baseUrl,
 				reasoning: false,
 				input: serverMetadata?.input ?? ["text"],
+				imageInputDecoder: "stb",
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				contextWindow: serverMetadata?.contextWindow ?? 128000,
 				maxTokens: Math.min(
@@ -460,6 +462,7 @@ export async function discoverOpenAIModelsList(
 				reasoning: toBooleanOrUndefined(item.reasoning) ?? false,
 				input: (toStringArrayOrUndefined(item.input) as ("text" | "image")[] | undefined) ??
 					nativeMetadataForModel?.input ?? ["text"],
+				...(providerConfig.discovery.type === "lm-studio" ? { imageInputDecoder: "stb" as const } : {}),
 				cost: toCostOrUndefined(item.cost) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				contextWindow,
 				maxTokens:
