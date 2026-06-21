@@ -134,10 +134,14 @@ function toBooleanOrUndefined(value: unknown): boolean | undefined {
 	return typeof value === "boolean" ? value : undefined;
 }
 
-function toStringArrayOrUndefined(value: unknown): string[] | undefined {
+function toInputModalitiesOrUndefined(value: unknown): ("text" | "image")[] | undefined {
 	if (!Array.isArray(value)) return undefined;
-	const strings = value.filter((item): item is string => typeof item === "string");
-	return strings.length === value.length ? strings : undefined;
+	const modalities: ("text" | "image")[] = [];
+	for (const item of value) {
+		if (item !== "text" && item !== "image") return undefined;
+		modalities.push(item);
+	}
+	return modalities;
 }
 
 function toCostOrUndefined(value: unknown): ModelSpec<Api>["cost"] | undefined {
@@ -460,8 +464,7 @@ export async function discoverOpenAIModelsList(
 				provider: providerConfig.provider,
 				baseUrl,
 				reasoning: toBooleanOrUndefined(item.reasoning) ?? false,
-				input: (toStringArrayOrUndefined(item.input) as ("text" | "image")[] | undefined) ??
-					nativeMetadataForModel?.input ?? ["text"],
+				input: toInputModalitiesOrUndefined(item.input) ?? nativeMetadataForModel?.input ?? ["text"],
 				...(providerConfig.discovery.type === "lm-studio" ? { imageInputDecoder: "stb" as const } : {}),
 				cost: toCostOrUndefined(item.cost) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				contextWindow,
@@ -564,8 +567,7 @@ export async function discoverProxyModels(
 				baseUrl,
 				reasoning: toBooleanOrUndefined(item.reasoning) ?? reference?.reasoning ?? false,
 				thinking: reference?.thinking,
-				input: (toStringArrayOrUndefined(item.input) as ("text" | "image")[] | undefined) ??
-					reference?.input ?? ["text"],
+				input: toInputModalitiesOrUndefined(item.input) ?? reference?.input ?? ["text"],
 				cost: toCostOrUndefined(item.cost) ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 				// Prefer explicit OMP metadata, then OpenAI-ish context_length, then bundled reference/default.
 				contextWindow:

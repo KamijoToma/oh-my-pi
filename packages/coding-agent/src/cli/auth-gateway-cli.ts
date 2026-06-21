@@ -227,6 +227,7 @@ function applyModelPatch(model: GatewayCatalogModel, patch: ModelPatch | undefin
 			id: model.id,
 			provider: model.provider,
 			api: model.api,
+			requestModelId: model.requestModelId,
 			baseUrl: model.baseUrl,
 			name: patch.name ?? model.name,
 			reasoning: patch.reasoning ?? model.reasoning,

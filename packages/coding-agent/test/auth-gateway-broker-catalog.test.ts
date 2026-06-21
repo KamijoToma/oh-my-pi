@@ -93,6 +93,26 @@ describe("auth-gateway broker-served catalog", () => {
 		expect(index.byId.get("acme/display-model")?.requestModelId).toBe("wire-model");
 	});
 
+	test("preserves broker catalog requestModelId when applying model overrides", () => {
+		const index = buildGatewayModelIndex(
+			snapshot(["acme"]),
+			catalog({
+				acme: {
+					baseUrl: "https://acme.example/v1",
+					api: "openai-completions",
+					models: [{ id: "display-model", requestModelId: "wire-model" }],
+					modelOverrides: {
+						"display-model": { name: "Display Override" },
+					},
+				},
+			}),
+			{ enabled: true, allowedBaseUrls: [] },
+		);
+
+		expect(index.byId.get("acme/display-model")?.requestModelId).toBe("wire-model");
+		expect(index.byId.get("acme/display-model")?.name).toBe("Display Override");
+	});
+
 	test("preserves provider disableStrictTools compat on catalog models", () => {
 		const index = buildGatewayModelIndex(
 			snapshot(["acme"]),

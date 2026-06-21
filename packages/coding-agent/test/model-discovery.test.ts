@@ -701,6 +701,38 @@ describe("ModelRegistry runtime discovery", () => {
 		expect(model?.supportsTools).toBe(true);
 	});
 
+	test("openai-models-list discovery ignores invalid API-reported input modalities", async () => {
+		writeRawModelsJson({
+			gateway: {
+				baseUrl: "http://127.0.0.1:9996",
+				api: "openai-completions",
+				auth: "none",
+				discovery: { type: "openai-models-list" },
+			},
+		});
+		const fetchMock: FetchImpl = async input => {
+			const url = String(input);
+			if (url === "http://127.0.0.1:9996/v1/models") {
+				return new Response(
+					JSON.stringify({
+						data: [
+							{
+								id: "acme/audio-model",
+								input: ["text", "audio"],
+							},
+						],
+					}),
+					{ status: 200, headers: { "Content-Type": "application/json" } },
+				);
+			}
+			throw new Error(`Unexpected URL: ${url}`);
+		};
+		const registry = new ModelRegistry(authStorage, modelsJsonPath, { fetch: fetchMock });
+		await registry.refresh();
+		const model = registry.find("gateway", "acme/audio-model");
+		expect(model?.input).toEqual(["text"]);
+	});
+
 	test("proxy discovery honors API-reported context_length and endpoint routing", async () => {
 		writeRawModelsJson({
 			"proxy-test": {
