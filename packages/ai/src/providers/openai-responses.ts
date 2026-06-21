@@ -21,6 +21,7 @@ import {
 	sanitizeOpenAIResponsesHistoryItemsForReplay,
 } from "../utils";
 import { createAbortSourceTracker } from "../utils/abort";
+import { withEmptyCompletionRetry } from "../utils/empty-completion-retry";
 import { AssistantMessageEventStream } from "../utils/event-stream";
 import { finalizeErrorMessage, type RawHttpRequestDump, rewriteCopilotError } from "../utils/http-inspector";
 import {
@@ -338,7 +339,7 @@ type OpenAIResponsesSamplingParams = ResponseCreateParamsStreaming & {
 /**
  * Generate function for OpenAI Responses API
  */
-export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
+const streamOpenAIResponsesOnce = (
 	model: Model<"openai-responses">,
 	context: Context,
 	options?: OpenAIResponsesOptions,
@@ -741,6 +742,15 @@ export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (
 	return stream;
 };
 
+/**
+ * Public entry: wrap the single-attempt Responses streamer with bounded
+ * empty-completion retries — a `response.completed` carrying no content/usage
+ * would otherwise stall the agent loop. Shared with the OpenAI-completions and
+ * Anthropic providers via `withEmptyCompletionRetry`.
+ */
+export const streamOpenAIResponses: StreamFunction<"openai-responses"> = (model, context, options) =>
+	withEmptyCompletionRetry(model, context, options, streamOpenAIResponsesOnce);
+
 export function buildParams(
 	model: Model<"openai-responses">,
 	context: Context,
@@ -855,15 +865,6 @@ export function buildParams(
 			if (toolChoice !== undefined && params.tools.length > 0) {
 				params.tool_choice = toolChoice;
 			}
-		}
-		// The apply_patch spec §1 marks only `apply_patch` itself as
-		// `supports_parallel_tool_calls = false`. OpenAI's Responses API
-		// exposes `parallel_tool_calls` as a request-scoped flag, not a
-		// per-tool one, so when a custom grammar tool is in the list we
-		// disable parallelism for the whole turn. Slightly coarser than
-		// the spec requires — but the platform API offers no finer knob.
-		if (params.tools.some(t => (t as { type?: string }).type === "custom")) {
-			params.parallel_tool_calls = false;
 		}
 	}
 

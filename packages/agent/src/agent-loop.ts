@@ -5,12 +5,9 @@
 import {
 	type AssistantMessage,
 	type AssistantMessageEvent,
-	arkToWireSchema,
 	type Context,
 	EventStream,
 	isApiKeyResolver,
-	isArkSchema,
-	isZodSchema,
 	resolveApiKeyOnce,
 	seedApiKeyResolver,
 	streamSimple,
@@ -20,7 +17,6 @@ import {
 	type TSchema,
 	toolWireSchema,
 	validateToolArguments,
-	zodToWireSchema,
 } from "@oh-my-pi/pi-ai";
 import {
 	type Dialect,
@@ -125,7 +121,7 @@ class HarmonyLeakInterruption extends Error {
 		this.name = "HarmonyLeakInterruption";
 	}
 }
-function resolveOwnedDialectFromEnv(value: string | undefined): Dialect | undefined {
+export function resolveOwnedDialectFromEnv(value: string | undefined): Dialect | undefined {
 	switch (value) {
 		case "1":
 		case "true":
@@ -506,7 +502,7 @@ function createDetailedCapture(config: AgentLoopConfig): {
 	};
 }
 
-function normalizeMessagesForProvider(
+export function normalizeMessagesForProvider(
 	messages: Context["messages"],
 	model: AgentLoopConfig["model"],
 ): Context["messages"] {
@@ -598,16 +594,8 @@ export function normalizeTools(
 			if (doInjectIntent) parameters = injectIntentIntoSchema(parameters, intentMode, false) as TSchema;
 			return { ...t, parameters, description: "" };
 		}
-		let parameters: TSchema = t.parameters;
-		if (doInjectIntent) {
-			if (isZodSchema(parameters)) {
-				parameters = injectIntentIntoSchema(zodToWireSchema(parameters), intentMode) as TSchema;
-			} else if (isArkSchema(parameters)) {
-				parameters = injectIntentIntoSchema(arkToWireSchema(parameters), intentMode) as TSchema;
-			} else {
-				parameters = injectIntentIntoSchema(parameters, intentMode) as TSchema;
-			}
-		}
+		let parameters = toolWireSchema(t) as TSchema;
+		if (doInjectIntent) parameters = injectIntentIntoSchema(parameters, intentMode) as TSchema;
 		const description = t.description ?? "";
 		const examplesBlock = exampleDialect
 			? renderToolExamples({ ...t, parameters }, exampleDialect, doInjectIntent ? INTENT_FIELD : undefined)
@@ -1173,7 +1161,7 @@ async function streamAssistantResponse(
 		};
 	}
 	if (config.transformProviderContext) {
-		llmContext = config.transformProviderContext(llmContext, config.model);
+		llmContext = await config.transformProviderContext(llmContext, config.model);
 	}
 
 	// Owned tool calling: take tool calls away from the provider and run them
@@ -1194,6 +1182,10 @@ async function streamAssistantResponse(
 
 	const dynamicReasoning = config.getReasoning?.();
 	const dynamicDisableReasoning = config.getDisableReasoning?.();
+	// `getServiceTier` is authoritative when present (replaces the static tier
+	// for both the wire request and telemetry), so callers can scope priority
+	// per model without touching the shared session `serviceTier`.
+	const effectiveServiceTier = config.getServiceTier ? config.getServiceTier(config.model) : config.serviceTier;
 	const harmonyMitigationEnabled = isHarmonyLeakMitigationTarget(config.model);
 	const harmonyAbortController = harmonyMitigationEnabled ? new AbortController() : undefined;
 	const requestSignal = harmonyAbortController
@@ -1241,7 +1233,7 @@ async function streamAssistantResponse(
 			topP: config.topP,
 			topK: config.topK,
 			presencePenalty: config.presencePenalty,
-			serviceTier: config.serviceTier,
+			serviceTier: effectiveServiceTier,
 			reasoningEffort: typeof effectiveReasoning === "string" ? effectiveReasoning : undefined,
 			toolChoice: effectiveToolChoice,
 			tools: llmContext.tools,
@@ -1263,7 +1255,7 @@ async function streamAssistantResponse(
 	const finishChat = async (message: AssistantMessage): Promise<void> => {
 		await finishChatSpan(telemetry, chatSpan, message, {
 			stepNumber: chatStepNumber,
-			serviceTier: config.serviceTier,
+			serviceTier: effectiveServiceTier,
 			responseHeaders: capturedHeaders,
 			baseUrl: config.model.baseUrl,
 		});
@@ -1279,6 +1271,7 @@ async function streamAssistantResponse(
 				reasoning: effectiveReasoning,
 				disableReasoning: effectiveDisableReasoning,
 				temperature: effectiveTemperature,
+				serviceTier: effectiveServiceTier,
 				signal: finalRequestSignal,
 				onResponse: captureOnResponse,
 			});

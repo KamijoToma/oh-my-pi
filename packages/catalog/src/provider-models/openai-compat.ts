@@ -4,7 +4,7 @@ import {
 	type OpenAICompatibleModelRecord,
 } from "../discovery/openai-compatible";
 import { Effort } from "../effort";
-import { toFireworksPublicModelId } from "../fireworks-model-id";
+import { FIREWORKS_FAST_SUFFIX, toFireworksPublicModelId } from "../fireworks-model-id";
 import { isGlmVisionModelId, isGrokReasoningEffortCapable, isReasoningGlmModelId } from "../identity/family";
 import type { ModelManagerOptions } from "../model-manager";
 import { getBundledModels } from "../models";
@@ -1259,6 +1259,51 @@ export function clampKimiK27CodeMaxTokens(modelId: string, candidate: number | n
 }
 
 /**
+ * Fireworks Fast variants we surface. Each inherits the base model's
+ * limits/modalities/thinking and overrides only the cost with the Standard-column
+ * Fast prices from the Serverless pricing table; `cacheWrite` stays 0 (Fireworks
+ * bills no cache-write). Derived from the bundled base entries so metadata stays
+ * in lockstep, and the runtime auto-falls back to the base id on a failed fast
+ * request. See https://docs.fireworks.ai/serverless/pricing.
+ */
+const FIREWORKS_FAST_VARIANT_SPECS: ReadonlyArray<{
+	base: string;
+	name: string;
+	cost: { input: number; output: number; cacheRead: number };
+}> = [
+	{ base: "kimi-k2.7-code", name: "Kimi K2.7 Code Fast", cost: { input: 1.9, output: 8, cacheRead: 0.38 } },
+	{ base: "kimi-k2.6", name: "Kimi K2.6 Fast", cost: { input: 2, output: 8, cacheRead: 0.3 } },
+	{ base: "glm-5.1", name: "GLM-5.1 Fast", cost: { input: 2.8, output: 8.8, cacheRead: 0.52 } },
+];
+
+/**
+ * Build the Fireworks Fast seed by projecting each base bundled spec into a
+ * `<id>-fast` variant. Pushed into the generated catalog (Fast routers never
+ * appear in the serverless control-plane list, so discovery cannot surface
+ * them) and deduped behind any identical previous-snapshot entry.
+ */
+export function buildFireworksFastSeed(): ModelSpec<"openai-completions">[] {
+	const bundled = createBundledReferenceMap<"openai-completions">("fireworks");
+	const seeds: ModelSpec<"openai-completions">[] = [];
+	for (const variant of FIREWORKS_FAST_VARIANT_SPECS) {
+		const base = bundled.get(variant.base);
+		if (!base) continue;
+		seeds.push({
+			...base,
+			id: `${variant.base}${FIREWORKS_FAST_SUFFIX}`,
+			name: variant.name,
+			cost: {
+				input: variant.cost.input,
+				output: variant.cost.output,
+				cacheRead: variant.cost.cacheRead,
+				cacheWrite: 0,
+			},
+		});
+	}
+	return seeds;
+}
+
+/**
  * Fireworks DeepSeek V4 accepts effort via `reasoning_effort` but rejects the
  * DeepSeek-native binary `thinking` toggle when both are present.
  */
@@ -1523,7 +1568,7 @@ export function firepassModelManagerOptions(
 }
 
 // ---------------------------------------------------------------------------
-// 7.7 Wafer (Pass + Serverless)
+// 7.7 Wafer Serverless
 // ---------------------------------------------------------------------------
 
 export interface WaferModelManagerConfig {
@@ -1536,13 +1581,14 @@ const WAFER_DEFAULT_BASE_URL = "https://pass.wafer.ai/v1";
 const WAFER_MAX_TOKENS_CAP = 65536;
 
 /**
- * Shared mapper for Wafer's `/v1/models` records.
+ * Mapper for Wafer Serverless `/v1/models` records.
  *
- * Wafer wraps each entry with a `wafer` envelope describing tier, capabilities,
- * and cents-per-million pricing. The mapper folds that metadata into the
- * canonical `ModelSpec<"openai-completions">` shape and applies zai-family thinking
- * compat when the entry advertises reasoning support (GLM-family on the Pass
- * SKU). Cents-per-million → dollars-per-million via /100.
+ * Wafer wraps each entry with a `wafer` envelope describing capabilities and
+ * pricing. The mapper folds that metadata into the canonical
+ * `ModelSpec<"openai-completions">` shape and applies upstream-specific thinking
+ * compat when the entry advertises reasoning support. Wafer pricing is exposed
+ * through internal wholesale units; the public Serverless rate equals
+ * `cents × 125 / 10000`.
  */
 interface WaferRecord {
 	context_length?: unknown;
@@ -1563,7 +1609,7 @@ function readWaferRecord(entry: OpenAICompatibleModelRecord): WaferRecord | unde
 }
 
 function mapWaferModel(
-	providerId: "wafer-pass" | "wafer-serverless",
+	providerId: "wafer-serverless",
 	baseUrl: string,
 	entry: OpenAICompatibleModelRecord,
 	defaults: ModelSpec<"openai-completions">,
@@ -1579,25 +1625,12 @@ function mapWaferModel(
 	);
 	const maxTokens = contextWindow !== null ? Math.min(contextWindow, WAFER_MAX_TOKENS_CAP) : null;
 	const pricing = wafer?.pricing ?? {};
-	// Wafer's `/v1/models` exposes pricing through `*_cents_per_million` fields,
-	// but the values are an internal wholesale unit, not literal cents — across
-	// every published Serverless model on wafer.ai the user-facing rate equals
-	// `cents × 125 / 10000` (i.e. wholesale × 1.25 / 100; GLM-5.1's `120` →
-	// $1.50/M, Kimi-K2.6's `88` → $1.10/M, etc.). The multiply-first form keeps
-	// the result a finite dyadic for every observed value.
-	// For the Pass SKU the per-token rate is bundled in the flat-rate
-	// subscription, so we follow the convention shared with
-	// `kimi-code`/`firepass`/`alibaba-coding-plan` and seed every Pass model with
-	// `cost: 0` regardless of what the upstream envelope says.
-	const isPassSku = providerId === "wafer-pass";
-	const cost = isPassSku
-		? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }
-		: {
-				input: (toPositiveNumber(pricing.input_cents_per_million, 0) * 125) / 10000,
-				output: (toPositiveNumber(pricing.output_cents_per_million, 0) * 125) / 10000,
-				cacheRead: (toPositiveNumber(pricing.cache_read_cents_per_million, 0) * 125) / 10000,
-				cacheWrite: 0,
-			};
+	const cost = {
+		input: (toPositiveNumber(pricing.input_cents_per_million, 0) * 125) / 10000,
+		output: (toPositiveNumber(pricing.output_cents_per_million, 0) * 125) / 10000,
+		cacheRead: (toPositiveNumber(pricing.cache_read_cents_per_million, 0) * 125) / 10000,
+		cacheWrite: 0,
+	};
 	const name = toModelName(wafer?.display_name, defaults.name);
 	const base: ModelSpec<"openai-completions"> = {
 		...defaults,
@@ -1643,13 +1676,12 @@ function mapWaferModel(
 	};
 }
 
-function createWaferOptions(
-	providerId: "wafer-pass" | "wafer-serverless",
-	config: WaferModelManagerConfig | undefined,
+export function waferServerlessModelManagerOptions(
+	config?: WaferModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
 	const baseUrl = config?.baseUrl ?? WAFER_DEFAULT_BASE_URL;
-	const passOnly = providerId === "wafer-pass";
+	const providerId = "wafer-serverless" as const;
 	return {
 		providerId,
 		...(apiKey && {
@@ -1659,28 +1691,11 @@ function createWaferOptions(
 					provider: providerId,
 					baseUrl,
 					apiKey,
-					filterModel: entry => {
-						if (!passOnly) return true;
-						const wafer = readWaferRecord(entry);
-						return wafer?.tier === "pass_included";
-					},
 					mapModel: (entry, defaults) => mapWaferModel(providerId, baseUrl, entry, defaults),
 					fetch: config?.fetch,
 				}),
 		}),
 	};
-}
-
-export function waferPassModelManagerOptions(
-	config?: WaferModelManagerConfig,
-): ModelManagerOptions<"openai-completions"> {
-	return createWaferOptions("wafer-pass", config);
-}
-
-export function waferServerlessModelManagerOptions(
-	config?: WaferModelManagerConfig,
-): ModelManagerOptions<"openai-completions"> {
-	return createWaferOptions("wafer-serverless", config);
 }
 
 // ---------------------------------------------------------------------------
@@ -2448,7 +2463,10 @@ export function moonshotModelManagerOptions(
 	config?: MoonshotModelManagerConfig,
 ): ModelManagerOptions<"openai-completions"> {
 	const apiKey = config?.apiKey;
-	const baseUrl = config?.baseUrl ?? "https://api.moonshot.ai/v1";
+	// `MOONSHOT_BASE_URL` redirects discovery (and the streaming request that
+	// inherits this baseUrl) at the Kimi China platform `api.moonshot.cn`; an
+	// explicit `config.baseUrl` still wins. Mirrors LITELLM_BASE_URL/LM_STUDIO_BASE_URL. (#2883)
+	const baseUrl = config?.baseUrl ?? Bun.env.MOONSHOT_BASE_URL ?? "https://api.moonshot.ai/v1";
 	const references = createBundledReferenceMap<"openai-completions">("moonshot");
 	return {
 		providerId: "moonshot",
