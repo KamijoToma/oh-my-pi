@@ -36,6 +36,7 @@ import {
 	clampKimiK27CodeMaxTokens,
 	isFireworksKimiK2ModelId,
 	isKimiK27CodeModelId,
+	LONGCAT_STATIC_MODELS,
 	MODELS_DEV_PROVIDER_DESCRIPTORS,
 	mapModelsDevToModels,
 	SAKANA_FUGU_STATIC_MODELS,
@@ -498,6 +499,11 @@ async function generateModels() {
 	if (!authoritativeCatalogProviders.has("sakana")) {
 		allModels.push(...SAKANA_FUGU_STATIC_MODELS);
 	}
+	// Seed LongCat's documented LongCat-2.0 model so the provider is usable
+	// when catalog generation has no live API key. LongCat is not
+	// dynamicModelsAuthoritative, so a live `/v1/models` refresh merges rather
+	// than replaces; the seed is the fallback for fresh installs.
+	allModels.push(...LONGCAT_STATIC_MODELS);
 	// Seed the GitLab Duo Agent fallback model so a fresh install (no credentialed
 	// dynamic discovery/cache yet) still surfaces the provider's default model in the
 	// built-in catalog. The descriptor deliberately has NO `catalogDiscovery`, so it is

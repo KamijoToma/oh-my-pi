@@ -25,6 +25,7 @@ import {
 	kimiCodeModelManagerOptions,
 	litellmModelManagerOptions,
 	lmStudioModelManagerOptions,
+	longcatModelManagerOptions,
 	mistralModelManagerOptions,
 	moonshotModelManagerOptions,
 	nanoGptModelManagerOptions,
@@ -210,6 +211,13 @@ export const CATALOG_PROVIDERS = [
 		envVars: ["LITELLM_API_KEY"],
 		createModelManagerOptions: (config: ModelManagerConfig) => litellmModelManagerOptions(config),
 		catalogDiscovery: { label: "LiteLLM", allowUnauthenticated: true },
+	},
+	{
+		id: "longcat",
+		defaultModel: "LongCat-2.0",
+		envVars: ["LONGCAT_API_KEY"],
+		createModelManagerOptions: (config: ModelManagerConfig) => longcatModelManagerOptions(config),
+		catalogDiscovery: { label: "LongCat" },
 	},
 	{
 		id: "lm-studio",

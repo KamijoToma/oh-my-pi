@@ -2877,6 +2877,77 @@ export function xiaomiModelManagerOptions(
 	};
 }
 // ---------------------------------------------------------------------------
+// 20.5 LongCat
+// ---------------------------------------------------------------------------
+
+const LONGCAT_DEFAULT_BASE_URL = "https://api.longcat.chat/openai/v1";
+
+export interface LongcatModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+/**
+ * Static seed for LongCat-2.0 so the provider is usable before the first
+ * successful `/v1/models` refresh (and when catalog generation runs without
+ * a live API key). LongCat-2.0: 1M context, 128K max output, reasoning via
+ * the `thinking: { type: "enabled" }` parameter (same shape as zai/moonshot).
+ */
+export const LONGCAT_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
+	{
+		id: "LongCat-2.0",
+		name: "LongCat 2.0",
+		api: "openai-completions",
+		provider: "longcat",
+		baseUrl: LONGCAT_DEFAULT_BASE_URL,
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0.75, output: 2.95, cacheRead: 0.015, cacheWrite: 0 },
+		contextWindow: 1_000_000,
+		maxTokens: 131_072,
+		thinking: {
+			mode: "effort",
+			// LongCat-2.0 thinking is binary: `thinking: { type: "enabled" }` /
+			// `{ type: "disabled" }`. There are no discrete effort tiers, so the
+			// zai-format effort map collapses minimal->disabled and the rest to
+			// enabled. xhigh has no wire meaning and is intentionally omitted.
+			efforts: [Effort.Minimal, Effort.Low, Effort.Medium, Effort.High],
+		},
+		compat: {
+			thinkingFormat: "zai",
+			reasoningContentField: "reasoning_content",
+			supportsDeveloperRole: false,
+		},
+	},
+];
+
+export function longcatModelManagerOptions(
+	config?: LongcatModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? LONGCAT_DEFAULT_BASE_URL;
+	const references = createBundledReferenceMap<"openai-completions">("longcat");
+	return {
+		providerId: "longcat",
+		...(apiKey && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-completions",
+					provider: "longcat",
+					baseUrl,
+					apiKey,
+					mapModel: (entry, defaults) => {
+						const reference = references.get(defaults.id);
+						return mapWithBundledReference(entry, defaults, reference);
+					},
+					fetch: config?.fetch,
+				}),
+		}),
+	};
+}
+
+// ---------------------------------------------------------------------------
 // 21. LiteLLM
 // ---------------------------------------------------------------------------
 

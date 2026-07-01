@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added LongCat provider registry definition with API-key login flow (`LONGCAT_API_KEY`, validated against the OpenAI-compatible `/v1/models` endpoint). (#3876)
+
 ## [16.2.12] - 2026-07-01
 
 ### Changed
