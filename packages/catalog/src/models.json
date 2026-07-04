@@ -35122,7 +35122,7 @@
 	"longcat": {
 		"LongCat-2.0": {
 			"id": "LongCat-2.0",
-			"name": "LongCat-2.0",
+			"name": "LongCat 2.0",
 			"api": "openai-completions",
 			"provider": "longcat",
 			"baseUrl": "https://api.longcat.chat/openai/v1",

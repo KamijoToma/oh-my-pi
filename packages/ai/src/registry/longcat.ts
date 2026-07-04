@@ -7,7 +7,7 @@ export const loginLongcat = createApiKeyLogin({
 	authUrl: "https://longcat.chat/platform/api_keys",
 	instructions: "Copy your API key from the LongCat platform console",
 	promptMessage: "Paste your LongCat API key",
-	placeholder: "...",
+	placeholder: "ak_...",
 	validation: {
 		kind: "models-endpoint",
 		provider: "longcat",

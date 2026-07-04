@@ -42,7 +42,7 @@ export const KNOWN_HOSTS = {
 	// protocol + `reasoning_content`, so it shares the zai host classification
 	// (binary thinkingFormat, supportsReasoningEffort=false, reasoning_content
 	// replay). Provider id stays "longcat"; only the host match widens.
-	zai: { providers: ["zai", "longcat"], urlMarkers: ["api.z.ai"] },
+	zai: { providers: ["zai", "longcat"], urlMarkers: ["api.z.ai", "api.longcat.chat"] },
 	zhipu: { providers: ["zhipu-coding-plan"], urlMarkers: ["open.bigmodel.cn"] },
 	kilo: { providers: ["kilo"], urlMarkers: ["api.kilo.ai"] },
 	alibabaDashscope: { providers: ["alibaba-coding-plan"], urlMarkers: ["dashscope"] },
