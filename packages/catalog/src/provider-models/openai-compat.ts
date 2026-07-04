@@ -2845,6 +2845,95 @@ export function sakanaModelManagerOptions(config?: SakanaModelManagerConfig): Mo
 }
 
 // ---------------------------------------------------------------------------
+// 16.6 LongCat (Meituan)
+// ---------------------------------------------------------------------------
+
+const LONGCAT_DEFAULT_BASE_URL = "https://api.longcat.chat/openai/v1";
+
+export interface LongcatModelManagerConfig {
+	apiKey?: string;
+	baseUrl?: string;
+	fetch?: FetchImpl;
+}
+
+export function longcatModelManagerOptions(
+	config?: LongcatModelManagerConfig,
+): ModelManagerOptions<"openai-completions"> {
+	const apiKey = config?.apiKey;
+	const baseUrl = config?.baseUrl ?? LONGCAT_DEFAULT_BASE_URL;
+	// LongCat's `/v1/models` returns only `{id, object, owned_by}` — no pricing,
+	// context, or capability hints — and its model id is case-sensitive
+	// (`LongCat-2.0`, not `longcat-2.0`, else HTTP 400 "Unsupported model").
+	// Bake the documented metadata onto every discovered entry so the live row
+	// is complete without relying on a bundled reference (which can't bootstrap
+	// for a brand-new provider: the live entry wins first-source dedup before
+	// any reference exists to merge from).
+	return {
+		providerId: "longcat",
+		...(apiKey && {
+			fetchDynamicModels: () =>
+				fetchOpenAICompatibleModels({
+					api: "openai-completions",
+					provider: "longcat",
+					baseUrl,
+					apiKey,
+					mapModel: (
+						_entry: OpenAICompatibleModelRecord,
+						defaults: ModelSpec<"openai-completions">,
+					): ModelSpec<"openai-completions"> => ({
+						...defaults,
+						reasoning: true,
+						input: ["text"],
+						contextWindow: 1_000_000,
+						maxTokens: 131_072,
+						cost: { input: 0.75, output: 2.95, cacheRead: 0.015, cacheWrite: 0 },
+						// Binary `thinking:{type:"enabled"|"disabled"}` only —
+						// LongCat ignores `reasoning_effort` and 400s on
+						// minimal/xhigh. The zai host classification (hosts.ts)
+						// derives supportsReasoningEffort=false so omp never
+						// emits it.
+						compat: {
+							thinkingFormat: "zai",
+							reasoningContentField: "reasoning_content",
+							supportsDeveloperRole: false,
+						},
+					}),
+					fetch: config?.fetch,
+				}),
+		}),
+	};
+}
+
+// Seed LongCat-2.0 so the provider is usable when catalog generation has no
+// live API key. If live `/v1/models` succeeds (longcat is NOT marked
+// dynamicModelsAuthoritative), live rows are deduped ahead of this seed.
+export const LONGCAT_STATIC_MODELS: readonly ModelSpec<"openai-completions">[] = [
+	{
+		id: "LongCat-2.0",
+		name: "LongCat 2.0",
+		api: "openai-completions",
+		provider: "longcat",
+		baseUrl: LONGCAT_DEFAULT_BASE_URL,
+		reasoning: true,
+		input: ["text"],
+		cost: { input: 0.75, output: 2.95, cacheRead: 0.015, cacheWrite: 0 },
+		contextWindow: 1_000_000,
+		maxTokens: 131_072,
+		// LongCat's OpenAI endpoint only supports the binary
+		// `thinking: {type:"enabled"|"disabled"}` toggle (DeepSeek-style),
+		// surfaced via `message.reasoning_content`; it ignores `reasoning_effort`
+		// and returns an empty body for `minimal`/`xhigh`. The `zai`
+		// thinkingFormat sends exactly that binary toggle and never emits
+		// `reasoning_effort` for a non-GLM id. (#longcat)
+		compat: {
+			thinkingFormat: "zai",
+			reasoningContentField: "reasoning_content",
+			supportsDeveloperRole: false,
+		},
+	},
+];
+
+// ---------------------------------------------------------------------------
 // 17. Qwen Portal
 // ---------------------------------------------------------------------------
 
