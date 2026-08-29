@@ -6,7 +6,7 @@ Terminology follows `docs/natives-architecture.md`:
 
 - **Generated binding**: public API in `packages/natives/native/index.d.ts`.
 - **Rust module layer**: N-API exports in `crates/pi-natives/src/*`.
-- **Shared scan cache**: `fs_cache`-backed directory-entry cache used by discovery/search flows.
+- **Shared scan cache**: `pi-walker`-backed directory-entry cache (`crates/pi-walker/src/cache.rs`) used by discovery flows; N-API filesystem DTOs/conversions live in `crates/pi-natives/src/iofs.rs`.
 
 ## Implementation files
 
@@ -14,7 +14,9 @@ Terminology follows `docs/natives-architecture.md`:
 - `crates/pi-natives/src/grep.rs`
 - `crates/pi-natives/src/glob.rs`
 - `crates/pi-natives/src/glob_util.rs`
-- `crates/pi-natives/src/fs_cache.rs`
+- `crates/pi-natives/src/iofs.rs`
+- `crates/pi-walker/src/lib.rs`
+- `crates/pi-walker/src/cache.rs`
 - `crates/pi-natives/src/fd.rs`
 - `crates/pi-natives/src/ast.rs`
 - `crates/pi-natives/src/text.rs`
@@ -30,7 +32,7 @@ Terminology follows `docs/natives-architecture.md`:
 | `hasMatch(content, pattern, ignoreCase?, multiline?)`                           | `hasMatch`                                       | `grep.rs`      |
 | `fuzzyFind(options)`                                                            | `fuzzyFind`                                      | `fd.rs`        |
 | `glob(options, onMatch?)`                                                       | `glob`                                           | `glob.rs`      |
-| `invalidateFsScanCache(path?)`                                                  | `invalidateFsScanCache`                          | `fs_cache.rs`  |
+| `invalidateFsScanCache(path?)`                                                  | `invalidateFsScanCache`                          | `iofs.rs`      |
 | `astGrep(options)`                                                              | `astGrep`                                        | `ast.rs`       |
 | `astMatch(options)`                                                             | `astMatch`                                       | `ast.rs`       |
 | `astEdit(options)`                                                              | `astEdit`                                        | `ast.rs`       |
@@ -51,7 +53,7 @@ Terminology follows `docs/natives-architecture.md`:
 ### Input/options flow
 
 1. Callers invoke generated native exports directly; there is no package-local TS wrapper that renames `search` to `searchContent`.
-2. Rust option structs in `grep.rs` deserialize camelCase fields (`ignoreCase`, `maxCount`, `contextBefore`, `contextAfter`, `maxColumns`, `timeoutMs`).
+2. Rust option structs in `grep.rs` deserialize camelCase fields (`ignoreCase`, `maxCount`, `maxCountPerFile`, `contextBefore`, `contextAfter`, `maxColumns`, `timeoutMs`).
 3. `grep` creates `CancelToken` from `timeoutMs` + `AbortSignal` and runs inside `task::blocking("grep", ...)`.
 4. `search` and `hasMatch` operate on provided string/`Uint8Array` content and do not scan the filesystem.
 
@@ -60,14 +62,13 @@ Terminology follows `docs/natives-architecture.md`:
 - **In-memory branch**
   - `search` -> `search_sync` / search helpers over provided content bytes.
   - `hasMatch` compiles/checks pattern against provided content and returns a boolean.
-  - No filesystem scan, no `fs_cache`.
+  - No filesystem scan, no scan cache.
 - **Single-file branch**
   - `grep` resolves path, checks metadata is file, and searches that file.
 - **Directory branch**
-  - Optional cache lookup via `fs_cache::get_or_scan` when `cache: true`.
-  - Fresh scan via `fs_cache::force_rescan` when `cache: false`.
-  - Optional empty-result recheck when cached results are older than the empty-result recheck threshold.
-  - Entry filtering: file-only + optional glob filter (`glob_util`) + optional type filter mapping (`js`, `ts`, `rust`, etc.).
+  - Rust builds a `pi_walker::WalkRequest` with `.cache(false)` hard-coded (`build_grep_walk_request`): directory searches stream while the tree is walked and never read or populate the shared scan cache.
+  - The walk yields file candidates directly to searchers (`glob`/type filters run walker-side; the type filter is applied per candidate).
+  - Files larger than the size cap are deferred to a trailing prefix pass that memory-maps only the leading window.
 
 ### Search/collection semantics
 
@@ -78,8 +79,12 @@ Terminology follows `docs/natives-architecture.md`:
 - Output modes:
   - `content` -> one `GrepMatch` per hit.
   - `count` and `filesWithMatches` map to count-style entries (`lineNumber=0`, `line=""`, `matchCount` set).
-  - `offset` and `maxCount` are applied during aggregation across sorted file results.
-  - Directory searches use parallel filesystem walking/searching, then aggregate per-file results to preserve global offset/limit semantics in the returned result and callback stream.
+- Directory streaming model (`run_streaming_grep`):
+  - With a content-mode match budget (`maxCount`, no `offset`), the budget terminates the walk itself: small budgets run a sequential early-exit walk, larger ones run a path-ordered walk that searches in windows and commits results after each window (`run_windowed_streaming_grep`), stopping once the budget is satisfied. Deterministic path-ordered first pages are preserved at every budget size.
+  - Without an early-stop budget, an unordered work-stealing parallel traversal feeds searchers directly (`run_parallel_streaming_grep`); per-file results are sorted by path afterwards.
+  - `maxCountPerFile` (content mode) caps matches collected per file so one hot file cannot exhaust the global `maxCount` budget before other files are reached.
+  - Oversized files (beyond the size cap) are deferred behind normal-sized results and searched over their leading window only (mmap prefix pass; no full-file read).
+  - `offset` and `maxCount` are applied while aggregating per-file results; the `onMatch` callback fires after aggregation so callback and returned-result semantics match.
 
 ### Result shaping back to JS
 
@@ -106,15 +111,13 @@ Terminology follows `docs/natives-architecture.md`:
 
 ## 2) File discovery (`glob`) and fuzzy path search (`fuzzyFind`)
 
-`glob` and `fuzzyFind` share `fs_cache` scans; matching logic differs.
+`glob` and `fuzzyFind` share `pi-walker` scans; matching logic differs.
 
 ### `glob` flow
 
 1. Caller passes `GlobOptions` directly. `pattern` and `path` are required in the generated type.
-2. Rust resolves the search path and compiles pattern via `glob_util::compile_glob`.
-3. Entry source:
-   - `cache=true` -> `get_or_scan` + optional stale-empty `force_rescan`.
-   - `cache=false` -> `force_rescan(..., store=false)` (fresh only).
+2. Rust resolves the search path (via `pi_walker::resolve_search_path`) and normalizes the pattern via `glob_util::build_glob_pattern`, compiled into a walker-side `pi_walker::CompiledWalkGlob` filter.
+3. Entry source: a `pi_walker::WalkRequest` with the glob filter pushed down walker-side; `.cache(config.cache)` selects cached vs fresh collection, and the walker's `EmptyRecheck` policy performs one fresh rescan when a cached scan filters to empty.
 4. Filtering:
    - skip `.git` always;
    - skip `node_modules` unless requested (`includeNodeModules`) or pattern mentions `node_modules`;
@@ -125,7 +128,7 @@ Terminology follows `docs/natives-architecture.md`:
 ### `fuzzyFind` flow
 
 1. Rust implementation lives in `fd.rs`; generated export is `fuzzyFind`.
-2. Shared scan source from `fs_cache` with the same cache/no-cache split and stale-empty recheck policy.
+2. Shared scan source from `pi-walker` with the same cache/no-cache split and walker-side stale-empty recheck policy.
 3. Scoring:
    - exact / starts-with / contains / subsequence-based fuzzy score;
    - separator/punctuation-normalized scoring path;
@@ -134,7 +137,7 @@ Terminology follows `docs/natives-architecture.md`:
 
 ### Failure behavior
 
-- Invalid glob pattern returns an error from `glob_util::compile_glob`.
+- Invalid glob pattern returns an error from the walker glob compilation (`pi_walker::CompiledWalkGlob`).
 - Search root must resolve to an existing directory for directory discovery flows.
 - Cancellation/timeouts propagate as abort errors via `CancelToken::heartbeat()` checks in loops.
 
@@ -158,28 +161,30 @@ Terminology follows `docs/natives-architecture.md`:
 
 These exports are direct native APIs used by tooling; they are not mediated by a TS wrapper in `packages/natives`.
 
-## 4) Shared scan/cache lifecycle (`fs_cache`)
+## 4) Shared scan/cache lifecycle (`pi-walker`)
 
-`fs_cache` stores scan results as normalized relative entries (`path`, `fileType`, optional `mtime` and regular-file `size`) keyed by:
+The shared scan cache lives in `crates/pi-walker/src/cache.rs`. It stores scan results as normalized relative entries (`path`, `fileType`, optional `mtime` and regular-file `size`) keyed by the canonical search root plus the full `WalkOptions` (minus the cache flag itself):
 
-- canonical search root,
 - `include_hidden`,
 - `use_gitignore`,
+- `skip_git`,
 - `skip_node_modules`,
-- scan detail (`Minimal` vs `Full`).
+- `follow_links` policy,
+- scan detail (`Minimal` vs `Full`),
+- remaining traversal knobs (`order`, depth bounds, error mode, ...).
 
-`follow_links` affects a fresh scan but is not currently part of the cache key.
+Native consumers (`glob`, `fuzzyFind`, `astGrep`/`astEdit`) build `pi_walker::WalkRequest`s; `grep` builds one with `.cache(false)` hard-coded. The N-API bridge (`invalidateFsScanCache`, entry DTOs) lives in `crates/pi-natives/src/iofs.rs`.
 
 ### Cache state transitions
 
 1. **Miss / disabled**
-   - TTL is `0` or key absent/expired -> fresh collection.
+   - TTL is `0` or key absent/expired -> fresh collection; disabled requests never touch the cache.
 2. **Hit**
    - Entry age is within TTL -> return cached entries + `cache_age_ms`.
 3. **Stale-empty recheck**
-   - If query yields zero matches and cache age exceeds the empty-result threshold, force one rescan.
+   - Walker-side: if a cached scan filters to zero accepted entries and the cache age exceeds the empty-result threshold (`EmptyRecheck` policy on the request, default `Configured`), the walker performs one fresh uncached rescan.
 4. **Invalidation**
-   - `invalidateFsScanCache(path?)`:
+   - `invalidateFsScanCache(path?)` (`iofs.rs` -> `pi_walker::invalidate_path_string`/`invalidate_all`):
      - no arg: clear all keys;
      - path arg: remove keys for roots affected by that path.
 
@@ -252,10 +257,10 @@ Text functions generally return deterministic transformed output; errors are lim
 | `highlight` module functions | No                | No                   | syntax + ANSI coloring only                   |
 | `countTokens`                | No                | No                   | tokenization only                             |
 | `astMatch`                   | No                | No                   | in-memory syntax-aware match (no disk)        |
-| `astGrep` / `astEdit`        | Yes               | No                   | syntax-aware file search/edit                 |
+| `astGrep` / `astEdit`        | Yes               | Always               | syntax-aware file search/edit (cached discovery) |
 | `glob`                       | Yes               | Optional             | directory scans + glob filtering              |
 | `fuzzyFind`                  | Yes               | Optional             | directory scans + fuzzy scoring               |
-| `grep` (file/dir path)       | Yes               | Optional in dir mode | ripgrep over files, optional filters/callback |
+| `grep` (file/dir path)       | Yes               | Never                | streaming walk feeding searchers, optional filters/callback |
 
 ## End-to-end lifecycle summary
 

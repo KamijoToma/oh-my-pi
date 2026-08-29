@@ -22,6 +22,7 @@ covering when a crate should be promoted to user-facing docs, see
 | `pi-uutils-ctx` | [`crates/pi-uutils-ctx`](../crates/pi-uutils-ctx) | Thread-local stdio + cwd context shim for embedding vendored uutils as in-process shell builtins. |
 | `brush-core` | [`crates/vendor/brush-core`](../crates/vendor/brush-core) | Vendored fork of [brush-shell](https://github.com/reubeno/brush) for embedded bash execution. |
 | `brush-builtins` | [`crates/vendor/brush-builtins`](../crates/vendor/brush-builtins) | Vendored bash builtins (`cd`, `echo`, `test`, `printf`, `read`, `export`, ...). |
+| `uu-*` (11 crates) | [`crates/vendor/`](../crates/vendor) (`uu-cat`, `uu-find`, `uu-head`, `uu-ls`, `uu-mkdir`, `uu-mv`, `uu-rm`, `uu-sort`, `uu-tail`, `uu-uniq`, `uu-wc`) | Vendored, patched [uutils](https://github.com/uutils/coreutils) utilities (pinned to 0.8.0; `find` from `uutils/findutils`) compiled into the embedded shell as in-process builtins (added 2026-06-26). |
 
 ## What lives where
 

@@ -17,19 +17,17 @@ It covers tool behavior, runner lifecycle, environment handling, execution seman
 
 ## What eval's Python backend is
 
-The `eval` tool executes one or more Python cells inside a retained `python` subprocess that speaks NDJSON over stdin/stdout. No Jupyter gateway and no extra pip dependencies are required — a vanilla Python 3.8+ interpreter is enough. Rich `display()` output (PIL, pandas, plotly, matplotlib figures) keeps working because the wrapper implements MIME-bundle dispatch.
+The `eval` tool executes one Python cell per call inside a retained `python` subprocess that speaks NDJSON over stdin/stdout. No Jupyter gateway and no extra pip dependencies are required — a vanilla Python 3.8+ interpreter is enough. Rich `display()` output (PIL, pandas, plotly, matplotlib figures) keeps working because the wrapper implements MIME-bundle dispatch.
 
-Tool params:
+Tool params (flat, single cell per call; `language` selects the backend):
 
 ```ts
 {
-  cells: Array<{
-    language: "py" | "js";
-    code: string;
-    title?: string;
-    timeout?: number; // seconds, clamped to 1..3600, default 30. Inactivity budget — see "Cell timeout".
-    reset?: boolean; // reset this cell's selected runtime before execution
-  }>;
+  language: "py" | "js" | "rb" | "jl";
+  code: string;
+  title?: string;
+  timeout?: number; // seconds, clamped to 1..3600, default 30. Inactivity budget — see "Cell timeout".
+  reset?: boolean; // reset this language's kernel before execution
 }
 ```
 
@@ -94,7 +92,7 @@ The runner's source transformer rewrites IPython-style magics to plain Python ca
 | `%reset`                          | Clear user globals and re-inject prelude.                                                                                                                   |
 | `%load <path>`                    | Read a file into a fresh cell and execute.                                                                                                                  |
 | `%run <path>`                     | `runpy.run_path` and merge globals back.                                                                                                                    |
-| `%%bash` / `%%sh`                 | Run the cell body via `bash`/`sh`.                                                                                                                          |
+| `%%bash`                          | Run the cell body via `bash` (the only registered shell cell magic; other names raise `Cell magic function ... not found`).                                 |
 | `%%capture [name]`                | Run body with stdout/stderr captured into `name`.                                                                                                           |
 | `%%timeit`                        | Time the cell body.                                                                                                                                         |
 | `%%writefile <path>`              | Write body to file.                                                                                                                                         |
@@ -118,17 +116,16 @@ Unknown magic names raise `NameError: UsageError: ...` inside the cell.
   - Shuts the subprocess down after the request.
   - No cross-call state persistence.
 
-### Multi-cell behavior in a single tool call
+### Single-cell calls
 
-Python cells run sequentially in the same selected Python kernel instance for that tool call.
+Each eval call runs exactly one cell in the selected Python kernel instance for that call; multi-step work is a sequence of eval calls reusing the retained kernel's state.
 
-If an intermediate cell fails:
+If the cell fails:
 
-- Earlier cell state remains in memory.
-- Tool returns a targeted error indicating which cell failed.
-- Later cells are not executed.
+- State from earlier calls remains in memory.
+- Tool returns the error output with a non-zero exit code.
 
-`reset=true` is per cell and resets that language runtime before the cell executes.
+`reset=true` resets this call's language runtime before the cell executes; the next Python call starts on the fresh kernel.
 
 ## Environment filtering and runtime resolution
 
@@ -156,7 +153,7 @@ The runner additionally receives `PYTHONUNBUFFERED=1` and `PYTHONIOENCODING=utf-
 - JavaScript backend only (`eval.py=false`, `eval.js=true`, or `PI_PY=0 PI_JS=1`)
 - both backends (`eval.py=true`, `eval.js=true`, or `PI_PY=1 PI_JS=1`)
 
-`PI_PY` and `PI_JS` use normal boolean flag parsing. Each flag, when set, overrides only its own setting; an unset flag falls back to its setting (`eval.py` / `eval.js`, both default `true`).
+`PI_PY` and `PI_JS` use normal boolean flag parsing. Each flag, when set, overrides only its own setting; an unset flag falls back to its setting (`eval.py` / `eval.js`, both default `true`). The opt-in Ruby and Julia backends are gated separately by `eval.rb` / `eval.jl` (both default `false`) and the `PI_RB` / `PI_JL` env flags.
 
 If Python preflight fails and `eval.js` is enabled, `eval` remains available for `js` cells; `py` cells fail with a Python-backend availability error.
 
@@ -166,7 +163,7 @@ Python prelude helpers include `agent(prompt, *, agent="task", model=None, label
 
 ### Cell timeout
 
-Each eval cell `timeout` is in seconds, defaults to 30, and is clamped to `1..3600`. It is a **wall-clock budget on the cell's own work** that the watchdog (`IdleTimeout`, `src/eval/idle-timeout.ts`) enforces, **but it is suspended while a host-side `agent()`/`parallel()`/`completion()` bridge call is in flight**: those calls emit synthetic pause/resume timeout-control status events (`withBridgeTimeoutPause`, `src/eval/bridge-timeout.ts`) that pause the watchdog entirely and start a fresh timeout window when control returns to the runtime, so a long fanout or a slow completion runs to completion instead of being killed mid-stream. Pause is reference-counted because `parallel()` can have multiple bridge calls in flight at once.
+The eval `timeout` is in seconds, defaults to 30, and is clamped to `1..3600`. It is a **wall-clock budget on the cell's own work** that the watchdog (`IdleTimeout`, `src/eval/idle-timeout.ts`) enforces, **but it is suspended while a host-side `agent()`/`parallel()`/`completion()` bridge call is in flight**: those calls emit synthetic pause/resume timeout-control status events (`withBridgeTimeoutPause`, `src/eval/bridge-timeout.ts`) that pause the watchdog entirely and start a fresh timeout window when control returns to the runtime, so a long fanout or a slow completion runs to completion instead of being killed mid-stream. Pause is reference-counted because `parallel()` can have multiple bridge calls in flight at once.
 
 The pause/resume events are the **sole** mechanism that suspends the budget. Everything else the cell does — compute, `stdout`/`stderr`, `log()`/`phase()`, and ordinary (non-agent) tool calls — counts against `timeout`, so a cell that is not delegating to an agent/completion is bounded by a plain wall-clock timeout. The tool combines the caller abort signal, the session abort signal, and the watchdog's signal with `AbortSignal.any(...)`; no wall-clock deadline is passed to the backend, so neither runtime arms a competing fixed timer.
 

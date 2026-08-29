@@ -344,7 +344,7 @@ Our fork has architectural decisions that differ from upstream. **Do not port th
 | Upstream                            | Our Fork                                                                                                      | Notes                                                     |
 | ----------------------------------- | ------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------- |
 | `createTool(cwd: string, options?)` | `createTools(session: ToolSession)` via `BUILTIN_TOOLS` registry                                              | Tool factories accept `ToolSession` and can return `null` |
-| Per-tool `*Operations` interfaces   | Only current per-tool override interfaces remain (for example `FindOperations`)                               | Used for SSH/remote overrides where present               |
+| Per-tool `*Operations` interfaces   | Only current per-tool override interfaces remain (for example `GlobOperations`); `FindOperations` survives only in the legacy shim (`src/extensibility/legacy-pi-coding-agent-shim.ts`) after the find→glob rename | Used for SSH/remote overrides where present               |
 | Node.js `fs/promises` everywhere    | Bun file APIs for simple file writes/reads, `node:fs/promises` for dirs, selected sync `node:fs` where needed | Prefer Bun APIs when they simplify                        |
 
 ### Auth Storage

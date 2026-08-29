@@ -134,7 +134,7 @@ If the runtime did not provide the resolve queue hook, `pushPendingAction` throw
 
 ## Tool-choice behavior
 
-When `queueResolveHandler(...)` registers a preview, the agent runtime forces a one-shot `resolve` tool choice so pending previews are explicitly finalized before normal tool flow continues.
+Registering a preview via `queueResolveHandler(...)` does not change `tool_choice`. The runtime injects the resolve reminder through the session's `SoftToolRequirement` (a non-consuming peek) and escalates to a one-turn forced `resolve` choice only if the model fails to call `resolve` that turn — see "Pending previews use a non-forcing soft tool requirement" above.
 
 ## Developer guidance
 

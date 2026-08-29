@@ -83,7 +83,7 @@ Flow (`#handleRetryableError`):
 
 `#retryAttempt` resets to `0` in these cases:
 
-- first successful non-error, non-aborted assistant message after retries started (emits `auto_retry_end { success: true }`)
+- first successful non-error, non-aborted assistant message after retries started (emits `auto_retry_end { success: true }` with `recoveredErrors` when the chain left recoverable error entries; see below)
 - retry cancellation during backoff sleep
 - max retries exceeded path
 - max delay exceeded path
@@ -197,9 +197,11 @@ Both commands return success responses; retry progress/failure details come from
 Session-level retry events:
 
 - `auto_retry_start { attempt, maxAttempts, delayMs, errorMessage }`
-- `auto_retry_end { success, attempt, finalError? }`
+- `auto_retry_end { success, attempt, finalError?, recoveredErrors? }`
 - `retry_fallback_applied { from, to, role }`
 - `retry_fallback_succeeded { model, role }`
+
+On success, `auto_retry_end` also carries additive `recoveredErrors` (16.3.6): one `RecoveredRetryError` (`entryId`, `persistenceKey`, `note`, `retryRecovery`) per persisted error entry left behind by the retry chain, recording how recovery happened (`recovery`: `plain`/`wait`/`credential`/`model`, plus a human-readable `note` such as `rate-limited; switched account; retried`) and which successful message superseded each error (`supersededBy` with timestamp/provider/model/responseId). Extensions and RPC consumers receive the same fields.
 
 Propagation:
 
@@ -232,6 +234,6 @@ A new retry chain can still start later on a future retryable error after counte
 ## Operational caveats
 
 - Classification is regex text matching; provider-specific structured errors are not used here.
-- Retry strips the failing assistant error from **runtime context** before re-continue, but session history still keeps that error entry.
+- Retry strips the failing assistant error from **runtime context** before re-continue, but session history still keeps that error entry. Since 16.3.6, when the retry chain eventually succeeds, each persisted error entry from the chain is marked with a `retryRecovery` marker (`status: "recovered"`, plus kind/attempt/note and the superseding message). Marked entries render as a dim, non-error one-line note instead of a red failure (live UI included, via the success event's `recoveredErrors`), and they are excluded when the LLM context is rebuilt on resume — the display transcript still keeps them visible.
 - `RpcSessionState` currently exposes `autoCompactionEnabled` but not an `autoRetryEnabled` field; RPC callers must track their own toggle state or query settings through other APIs.
 - Model fallback changes append temporary `model_change` entries and may later restore the primary model when its cooldown expires, depending on `retry.fallbackRevertPolicy`.

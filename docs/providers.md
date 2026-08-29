@@ -121,6 +121,11 @@ Each provider has one or more environment variables that supply a key when no st
 | `alibaba-coding-plan` | `ALIBABA_CODING_PLAN_API_KEY` |
 | `aimlapi` | `AIMLAPI_API_KEY` |
 | `gitlab-duo` | `GITLAB_TOKEN` |
+| `gitlab-duo-agent` | `GITLAB_TOKEN` (GitLab Duo Workflow; same token as `gitlab-duo`, OAuth login also available) |
+| `devin` | `DEVIN_API_KEY` (OAuth login also available) |
+| `sakana` | `SAKANA_API_KEY`, then `FUGU_API_KEY` |
+| `coreweave` | `COREWEAVE_API_KEY`, then `WANDB_API_KEY`; `COREWEAVE_PROJECT` supplies the required `OpenAI-Project` header |
+| `baseten` | `BASETEN_API_KEY` (interactive API-key login also available) |
 | `opencode-zen`, `opencode-go` | `OPENCODE_API_KEY` |
 | `firepass` | `FIREPASS_API_KEY` |
 | `wafer-serverless` | `WAFER_SERVERLESS_API_KEY` |
@@ -130,7 +135,7 @@ Each provider has one or more environment variables that supply a key when no st
 | `lm-studio` | `LM_STUDIO_API_KEY` (optional; keyless by default) |
 | `llama.cpp` | `LLAMA_CPP_API_KEY` (only when the server requires auth) |
 
-OAuth-backed providers such as `anthropic`, `github-copilot`, `cursor`, `ollama-cloud`, `qwen-portal`, `kimi-code`, `xai-oauth`, `wafer-serverless`, `google-gemini-cli`, and `google-antigravity` are normally reached through `/login` rather than an environment variable. See [Environment variables](./environment-variables.md) for search-tool and configuration variables not listed here.
+OAuth-backed providers such as `anthropic`, `github-copilot`, `cursor`, `ollama-cloud`, `qwen-portal`, `kimi-code`, `xai-oauth`, `wafer-serverless`, `google-gemini-cli`, and `google-antigravity` are normally reached through `/login` rather than an environment variable. `devin` and `gitlab-duo-agent` also provide `/login` OAuth flows but additionally accept `DEVIN_API_KEY` and `GITLAB_TOKEN` environment variables, and `baseten` / `coreweave` use interactive API-key logins while still honoring their environment variables. See [Environment variables](./environment-variables.md) for search-tool and configuration variables not listed here.
 
 ### `.env` discovery and precedence
 

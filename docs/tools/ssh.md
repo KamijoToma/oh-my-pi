@@ -99,7 +99,8 @@ Failure behavior:
 - Output tail window: `DEFAULT_MAX_BYTES = 50 * 1024` in `packages/coding-agent/src/session/streaming-output.ts`.
 - Output sink spill threshold defaults to the same `50 KiB`; once exceeded, only the tail remains in memory.
 - SSH master reuse persistence: `ControlPersist=3600` in `packages/coding-agent/src/ssh/connection-manager.ts` and `packages/coding-agent/src/ssh/sshfs-mount.ts`.
-- SSH host info schema version: `HOST_INFO_VERSION = 2` in `packages/coding-agent/src/ssh/connection-manager.ts`; stale cache entries are reprobed.
+- SSH host info schema version: `HOST_INFO_VERSION = 4` in `packages/coding-agent/src/ssh/connection-manager.ts`; stale cache entries are reprobed.
+- Pre-command SSH helper timeout: `SSH_HELPER_TIMEOUT_MS = 30_000` in `packages/coding-agent/src/ssh/connection-manager.ts`. Connection checks, control-master startup/exit, and host/shell probes (`runSshSync` / `runSshCaptureSync`) each get a 30-second budget so an unreachable host or wedged control-master cannot hang before the tool's user-provided command timeout applies.
 - Streaming tail buffer compacts after more than `10` pending chunks (`MAX_PENDING`) before trimming.
 
 ## Errors

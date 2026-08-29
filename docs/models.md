@@ -29,19 +29,9 @@ Legacy behavior still present:
 providers:
   <provider-id>:
     # provider-level config
-equivalence:
-  overrides:
-    <provider-id>/<model-id>: <canonical-model-id>
-  exclude:
-    - <provider-id>/<model-id>
 ```
 
-`provider-id` is the canonical provider key used across selection and auth lookup.
-
-`equivalence` is optional and configures canonical model grouping on top of concrete provider models:
-
-- `overrides` maps an exact concrete selector (`provider/modelId`) to an official upstream canonical id
-- `exclude` opts a concrete selector out of canonical grouping
+`provider-id` is the provider key used across selection and auth lookup.
 
 ## Provider-level fields
 
@@ -89,6 +79,11 @@ providers:
             gateway: m1-01
             controller: mlx
 ```
+
+### Compaction options
+
+- `compactionModel` (per model, including `modelOverrides`) — selector for the model used to summarize/compact context when this model's session is compacted, instead of the model itself.
+- `remoteCompaction` (provider level or per model) — opts eligible models into provider-native compaction. Supported keys: `enabled`, `api`, `endpoint`, `model`, `v2StreamingEnabled`, `v2Endpoint`, `streamingEndpoint`. Provider-level settings are the baseline; per-model keys override them.
 
 ### Allowed provider/model `api` values
 
@@ -169,7 +164,7 @@ ModelRegistry pipeline (on refresh):
 ### Provider-model cache and static fingerprint
 
 Cached per-provider model lists are persisted in the model-cache SQLite
-database (current schema version 6) with a `static_fingerprint` column that
+database (current schema version 8) with a `static_fingerprint` column that
 hashes the static catalog slice merged into the row. When `resolveProviderModels`
 skips the network fetch and the fingerprint of the in-memory static
 catalog matches the cached one, the cached rows are returned verbatim —
@@ -177,77 +172,11 @@ the static + dynamic merge is bypassed entirely. The fingerprint is
 memoized per process by tagging the static-models array with a symbol
 property, so repeated cold-start calls do not re-hash.
 
-## Canonical model equivalence and coalescing
-
-The registry keeps every concrete provider model and then builds a canonical layer above them.
-
-Canonical ids are official upstream ids only, for example:
-
-- `claude-opus-4-6`
-- `claude-haiku-4-5`
-- `gpt-5.3-codex`
-
-### `models.yml` equivalence config
-
-Example:
-
-```yaml
-providers:
-  zenmux:
-    baseUrl: https://api.zenmux.example/v1
-    apiKey: ZENMUX_API_KEY
-    api: openai-codex-responses
-    models:
-      - id: codex
-        name: Zenmux Codex
-        reasoning: true
-        input: [text]
-        cost:
-          input: 0
-          output: 0
-          cacheRead: 0
-          cacheWrite: 0
-        contextWindow: 200000
-        maxTokens: 32768
-
-equivalence:
-  overrides:
-    zenmux/codex: gpt-5.3-codex
-    p-codex/codex: gpt-5.3-codex
-  exclude:
-    - demo/codex-preview
-```
-
-Build order for canonical grouping:
-
-1. exact user override from `equivalence.overrides`
-2. bundled official-id matches from built-in model metadata
-3. conservative heuristic normalization for gateway/provider variants
-4. fallback to the concrete model's own id
-
-Current heuristics are intentionally narrow:
-
-- embedded upstream prefixes can be stripped when present, for example `anthropic/...` or `openai/...`
-- dotted and dashed version variants can normalize only when they map to an existing official id, for example `4.6 -> 4-6`
-- ambiguous families or versions are not merged without a bundled match or explicit override
-
-### Canonical resolution behavior
-
-When multiple concrete variants share a canonical id, resolution uses:
-
-1. availability and auth
-2. `config.yml` `modelProviderOrder`
-3. existing registry/provider order if `modelProviderOrder` is unset
-
-Disabled or unauthenticated providers are skipped.
-
-Session state and transcripts continue to record the concrete provider/model that actually executed the turn.
-
-Provider defaults vs per-model overrides:
+## Provider defaults vs per-model overrides
 
 - Provider `headers` are baseline.
 - Model `headers` override provider header keys.
-- `modelOverrides` can override model metadata (`name`, `reasoning`, `thinking`, `input`, `supportsTools`, `cost`, `premiumMultiplier`, `contextWindow`, `maxTokens`, `omitMaxOutputTokens`, `headers`, `compat`, `contextPromotionTarget`).
+- `modelOverrides` can override model metadata (`name`, `reasoning`, `thinking`, `input`, `supportsTools`, `cost`, `premiumMultiplier`, `contextWindow`, `maxTokens`, `omitMaxOutputTokens`, `headers`, `compat`, `contextPromotionTarget`, `compactionModel`, `remoteCompaction`).
 - `compat` is deep-merged for nested routing blocks (`openRouterRouting`, `vercelGatewayRouting`, `extraBody`).
 
 ## Runtime discovery integration
@@ -415,7 +344,6 @@ So a model can exist in registry but not be selectable until auth is available.
 `model-resolver.ts` supports:
 
 - exact `provider/modelId`
-- exact canonical model id
 - exact model id (provider inferred)
 - fuzzy/substring matching
 - glob scope patterns in `--models` (e.g. `openai/*`, `*sonnet*`)
@@ -425,10 +353,19 @@ So a model can exist in registry but not be selectable until auth is available.
 
 Resolution precedence for exact selectors:
 
-1. exact `provider/modelId` bypasses coalescing
-2. exact canonical id resolves through the canonical index
-3. exact bare concrete id still works
-4. fuzzy and glob matching run after the exact paths
+1. exact `provider/modelId` reference
+2. exact bare id (case-insensitive); when several providers carry the same id, a preference ranking picks the winner (see below)
+3. retired effort-tier variant alias (collapsed catalog entries, e.g. `-high`/`-thinking` ids)
+4. provider-scoped fuzzy match, then substring matching with an alias-vs-dated pick
+
+Glob scope patterns (used by `enabledModels` and CLI `--models`) run separately over concrete models after exact matching.
+
+When a bare id matches models from multiple providers, preference order is:
+
+1. recently used model variants
+2. provider priority (`modelProviderOrder` setting, then built-in catalog provider priority)
+3. recently used providers
+4. registry order
 
 ### Initial model selection priority
 
@@ -456,18 +393,18 @@ Related settings:
 
 - `modelRoles` (record)
 - `enabledModels` (scoped pattern list)
-- `modelProviderOrder` (global canonical-provider precedence)
+- `modelProviderOrder` (global provider precedence for bare-id matches)
 - `providers.kimiApiFormat` (`openai` or `anthropic` request format)
 - `providers.openaiWebsockets` (`auto|off|on` websocket preference for OpenAI Codex transport)
 
 `modelRoles` may store either:
 
 - `provider/modelId` to pin a concrete provider variant
-- a canonical id such as `gpt-5.3-codex` to allow provider coalescing
+- a bare model id such as `gpt-5.3-codex`, resolved by exact id with provider preference
 
 For `enabledModels` and CLI `--models`:
 
-- exact canonical ids expand to all concrete variants in that canonical group
+- bare ids match concrete models via exact id + provider preference
 - explicit `provider/modelId` entries stay exact
 - globs and fuzzy matches still operate on concrete models
 
@@ -492,12 +429,10 @@ String entries apply everywhere. Scoped entries apply when the current working d
 
 Both surfaces keep provider-prefixed models visible and selectable.
 
-They now also expose canonical/coalesced models:
+- `/model` shows an all-models tab plus one tab per provider
+- `omp models` (default `ls` action) prints provider-grouped tables of every available model; `omp models find <substring>` filters by provider, id, or name; `omp models refresh` forces an online catalog re-fetch ignoring the model cache TTL; any provider name doubles as an `ls` filter (e.g. `omp models openai-codex`). Flags: `--json`, `-e <path>` (load extension, repeatable), `--no-extensions`, `--config <overlay>` (extra config overlay, repeatable)
 
-- `/model` includes a canonical view alongside provider tabs
-- `omp models` prints provider-grouped tables of every concrete model, and `omp models canonical` prints the coalesced canonical view
-
-Selecting a canonical entry stores the canonical selector. Selecting a provider row stores the explicit `provider/modelId`.
+Selecting a row stores the explicit `provider/modelId`.
 
 ## Context promotion (model-level fallback chains)
 

@@ -84,6 +84,9 @@ These are consumed via `getEnvApiKey()` (`packages/ai/src/stream.ts`) unless not
 | `OLLAMA_CLOUD_API_KEY`          | Ollama Cloud auth                                | Using `ollama-cloud` provider                                  |                                                                                                     |
 | `WAFER_SERVERLESS_API_KEY`      | Wafer Serverless auth                            | Using `wafer-serverless` provider                              | Pay-as-you-go Wafer SKU; validated against `https://pass.wafer.ai/v1/models`                        |
 | `GITLAB_TOKEN`                  | GitLab Duo auth                                  | Using `gitlab-duo` provider                                    |                                                                                                     |
+| `BASETEN_API_KEY`               | Baseten auth                                     | Using `baseten` provider                                       | Also configured via the interactive API-key login (`/login baseten`, key from the Baseten dashboard) |
+| `COREWEAVE_API_KEY` / `WANDB_API_KEY` | CoreWeave Serverless Inference auth        | Using `coreweave` provider                                     | Either variable works (W&B fallback). `COREWEAVE_PROJECT` (fallback `WANDB_INFERENCE_PROJECT`) supplies the required `OpenAI-Project` header |
+| `SAKANA_API_KEY` / `FUGU_API_KEY` | Sakana AI auth                                 | Using `sakana` provider                                        | Either variable works; `SAKANA_BASE_URL` / `FUGU_BASE_URL` override the request base URL            |
 
 ### GitHub/Copilot tokens
 
@@ -109,6 +112,18 @@ The gateway has no dedicated env vars — it inherits `OMP_AUTH_BROKER_*`. Its o
 ---
 
 ## 2) Provider-specific runtime configuration
+
+### Provider-wide HTTP proxying
+
+Every provider request is wrapped with a proxy-aware fetch. Proxy selection:
+
+| Variable                    | Behavior                                                                                                                                                |
+| --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PI_PROXY_<PROVIDER>`       | Per-provider proxy URL (e.g. `github-copilot` → `PI_PROXY_GITHUB_COPILOT`; the provider id is uppercased with non-alphanumerics mapped to `_`). Wins over `PI_PROXY`. |
+| `PI_PROXY`                  | Provider-wide fallback proxy URL used when no per-provider variable is set                                                                               |
+| `NO_PROXY` / `no_proxy`     | Comma/whitespace-separated hosts excluded from proxying; supports `*`, `.domain` suffix matching, and `host:port` entries                                |
+
+Local and cloud-metadata hosts (localhost, loopback, RFC1918 private ranges, `169.254.x.x`, `metadata.google.internal`) always bypass the proxy.
 
 ### Anthropic Foundry Gateway (Azure / enterprise proxy)
 
@@ -157,7 +172,7 @@ When `CLAUDE_CODE_USE_FOUNDRY` is enabled, Anthropic requests switch to Foundry 
 | `AWS_WEB_IDENTITY_TOKEN_FILE` + `AWS_ROLE_ARN`                                  | Marks Bedrock as available in provider detection (same caveat as the ECS variables above)     |
 | `AWS_BEDROCK_SKIP_AUTH`                                                         | If `1`, injects dummy credentials (proxy/non-auth scenarios)                                  |
 | `HTTPS_PROXY` / `HTTP_PROXY`                                                    | Honored via Bun's native fetch proxy support (the provider no longer ships an AWS SDK / proxy-agent transport) |
-| `NO_PROXY`                                                                      | Excludes matching hosts from Bun's native proxy routing                                       |
+| `NO_PROXY`                                                                      | Excludes matching hosts from Bun's native proxy routing (see also the provider-wide `PI_PROXY`/`NO_PROXY` section above) |
 
 Region fallback in provider code: `options.region` → `AWS_REGION` → `AWS_DEFAULT_REGION` → `us-east-1`.
 
@@ -252,6 +267,11 @@ OAuth host chain: `KIMI_CODE_OAUTH_HOST` → `KIMI_OAUTH_HOST` → `https://auth
 | `PARALLEL_API_KEY`                                  | Parallel search provider                                      |
 | `SEARXNG_ENDPOINT`, `SEARXNG_TOKEN`                 | SearXNG endpoint and optional bearer token                    |
 | `SEARXNG_BASIC_USERNAME`, `SEARXNG_BASIC_PASSWORD`  | SearXNG HTTP Basic Auth credentials                           |
+| `TINYFISH_API_KEY`                                  | TinyFish search provider                                      |
+| `FIRECRAWL_API_KEY`                                 | Firecrawl search provider                                     |
+| `GEMINI_SEARCH_MODEL`                               | Gemini (Cloud Code Assist) search provider model override; wins over the configured model (default `gemini-2.5-flash`) |
+
+The DuckDuckGo search provider is keyless (it queries DuckDuckGo's HTML endpoint directly) and needs no credentials.
 
 SearXNG also reads the equivalent `searxng.endpoint`, `searxng.token`, `searxng.basicUsername`, and `searxng.basicPassword` settings from `~/.omp/agent/config.yml`; environment variables are fallbacks.
 
@@ -342,6 +362,7 @@ Extra conditional behavior:
 | `PI_FORCE_IMAGE_PROTOCOL`    | Forces supported image protocol (`kitty`, `iterm2`/`iterm`, `sixel`, `none`) where used                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
 | `PI_ALLOW_SIXEL_PASSTHROUGH` | Allows SIXEL passthrough when `PI_FORCE_IMAGE_PROTOCOL=sixel`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | `PI_NO_PTY`                  | If `1`, disables interactive PTY path for bash tool                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| `PI_WALK_WORKERS`            | Filesystem walker worker count for the `omp grep` walker (default `4`; `0` = auto-detect, `1` = serial). Renamed from `PI_GREP_WORKERS` in 16.2.10; the old name is no longer read                                                                                                                                                                                                                                                                                                                                                          |
 | `OMP_MCP_TIMEOUT_MS`         | Overrides MCP client request timeout (ms) for every MCP server. `0` disables client-side timeouts (`AbortSignal` never fires). Invalid (negative or non-numeric) values are ignored with a warning and the per-server config or default (`30000`) is used.                                                                                                                                                                                                                                                                                                                                                 |
 
 `PI_NO_PTY` is also set internally when CLI `--no-pty` is used.

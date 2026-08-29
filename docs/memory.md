@@ -28,6 +28,9 @@ The agent can read memory files directly using `memory://` URLs with the `read` 
 | `memory://root`                        | Compact summary injected at startup |
 | `memory://root/MEMORY.md`              | Full long-term memory document      |
 | `memory://root/skills/<name>/SKILL.md` | A generated skill playbook          |
+| `memory://<memory-id>`                 | Full Mnemopi memory row (working or episodic) with a YAML frontmatter metadata header; only available when `memory.backend` is `mnemopi` |
+
+The `memory://<memory-id>` form returns the full stored row rather than the clipped recall preview (recall content that exceeds the preview cap ends with a trailing `…`); agents are instructed to read it before any `memory_edit update`.
 
 ### `/memory` slash command
 

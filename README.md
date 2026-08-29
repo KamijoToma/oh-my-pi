@@ -24,7 +24,7 @@
 
 The most capable agent surface that ships. Continuously tuned by real-world use — complete out of the box, open all the way down.
 
-**40+** providers · **32** built-in tools · **14** lsp ops · **28** dap ops · **~55k** lines of Rust core.
+**40+** providers · **30** built-in tools · **14** lsp ops · **28** dap ops · **~55k** lines of Rust core.
 
 ## Install
 
@@ -87,7 +87,7 @@ Edits that land on the first attempt. Reads that summarize files instead of dump
 | MiniMax          | 2.1×         | Pass rate more than doubles. Same weights, same prompt.               |
 
 - `read` : summarized snippets · ideal defaults · selector hit rate
-- `search` : fastest in the west
+- `grep` : fastest in the west
 - `lsp` : everything your IDE knows, the agent knows
 - `prompts` : adjusted relentlessly for each model
 
@@ -99,7 +99,7 @@ Originally built on [Mario Zechner](https://github.com/mariozechner)'s wonderful
 
 ### 01 · Code execution w/ tool-calling
 
-Most harnesses give the agent a Python sandbox and call it done. Ours runs persistent Python and a Bun worker, and either kernel can call back into the agent's own tools — read, search, task — over a loopback bridge. The agent loads a CSV with tool.read from inside Python, charts it from JavaScript, and never leaves the cell.
+Most harnesses give the agent a Python sandbox and call it done. Ours runs persistent Python and a Bun worker, and either kernel can call back into the agent's own tools — read, grep, task — over a loopback bridge. The agent loads a CSV with tool.read from inside Python, charts it from JavaScript, and never leaves the cell.
 
 ![omp TUI: a single eval session with `[1/2] pandas describe` (Python) printing a real DataFrame.describe() table, followed by `[2/2] top scorer` (JavaScript) running a reduce. Footer: 'Both kernels ran in one session.'](https://omp.sh/captures/eval.webp)
 
@@ -191,7 +191,7 @@ omp reads the working tree through git_overview, git_file_diff, and git_hunk, th
 
 ### 17 · Read PRs. _Walk skills._ Pull JSON out of subagents.
 
-Twelve internal schemes — `pr://`, `issue://`, `agent://`, `skill://`, `rule://`, and the rest — resolve transparently inside every FS-shaped tool the agent already calls. `read pr://1428` returns the same shape as `read src/foo.ts`. `search` walks a diff like a directory. `agent://<id>/findings.0.path` pulls a field out of a subagent's output by path.
+Twelve internal schemes — `pr://`, `issue://`, `agent://`, `skill://`, `rule://`, and the rest — resolve transparently inside every FS-shaped tool the agent already calls. `read pr://1428` returns the same shape as `read src/foo.ts`. `grep` walks a diff like a directory. `agent://<id>/findings.0.path` pulls a field out of a subagent's output by path.
 
 ![omp TUI reading pr://can1357/oh-my-pi/1063 and then /diff/1, showing hunk headers, added lines, and a [MODIFIED] (+12 -0) summary.](https://omp.sh/captures/pr.webp)
 
@@ -219,7 +219,7 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 
 ## Whatever the task needs, _it's already in the box_.
 
-32 tools live in the same namespace as `read` and `bash`. Pin the active set with `--tools read,edit,bash,…` and the rest stay hidden but indexed — `search_tool_bm25` pulls them back in mid-session when `tools.discoveryMode` says so.
+30 built-in tools live in the same namespace as `read` and `bash`. Pin the active set with `--tools read,edit,bash,…` and the rest stay hidden but indexed — `search_tool_bm25` pulls them back in mid-session when `tools.discoveryMode` says so.
 
 **Files & search**
 
@@ -228,8 +228,8 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 - `edit` — hashline patches with content-hash anchors and stale-anchor recovery.
 - `ast_edit` — structural rewrites previewed before apply, via ast-grep.
 - `ast_grep` — structural code queries over 50+ tree-sitter grammars.
-- `search` — regex over files, globs, and internal URLs.
-- `find` — glob-based path lookup; reach for `search` when you need content matches.
+- `grep` — regex over files, globs, and internal URLs.
+- `glob` — glob-based path lookup; reach for `grep` when you need content matches.
 
 **Runtime**
 
@@ -255,9 +255,7 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 - `browser` — Puppeteer tabs over headless Chromium or CDP-attached apps.
 - `web_search` — one query across configured providers, returning answer plus citations.
 - `github` — GitHub CLI ops — repo, PR, issues, code search, Actions run-watch.
-- `generate_image` — generate or edit raster images via Gemini, GPT, or xAI Grok image models.
 - `inspect_image` — vision-model analysis of a local image file.
-- `tts` — text-to-speech via xAI Grok Voice — five built-in voices, WAV or MP3.
 
 **Memory & state**
 
@@ -266,13 +264,17 @@ Stealth's on by default, so pages see a normal user instead of a headless bot. T
 - `retain` — queue durable facts into the active Hindsight bank.
 - `recall` — search the Hindsight bank for raw memories.
 - `reflect` — ask Hindsight to synthesize an answer over the bank.
+- `memory_edit` — update, forget, or invalidate Mnemopi memories.
+- `learn` — capture a reusable lesson to memory (and optionally a managed skill).
+- `manage_skill` — create, update, or delete an isolated managed skill.
 
 **Misc**
 
-- `resolve` — apply or discard a queued preview action.
 - `search_tool_bm25` — BM25 over the hidden tool index; activates top matches mid-session.
 
-Setting-gated, off by default: `github`, `inspect_image`, `tts`, `checkpoint`, `rewind`, `search_tool_bm25`, `retain`, `recall`, `reflect`. Flip them on once, scoped per project.
+Outside the built-in registry: `generate_image` (generate or edit raster images via Gemini, GPT, or xAI Grok image models) and `tts` (text-to-speech via xAI Grok Voice — five built-in voices, WAV or MP3) register as custom tools, and `resolve` (apply or discard a queued preview action) is a hidden dispatcher.
+
+Setting-gated, off by default: `github`, `inspect_image`, `tts`, `checkpoint`, `rewind`, `search_tool_bm25`, `retain`, `recall`, `reflect`, `memory_edit`, `learn`, `manage_skill`. Flip them on once, scoped per project.
 
 [Full reference →](https://omp.sh/docs/tools)
 
@@ -324,7 +326,7 @@ Eighteen backends. Pin one, or let `auto` walk the chain in order.
 | `gemini`     | oauth                  |
 | `anthropic`  | oauth                  |
 | `codex`      | oauth                  |
-| `xai`        | `XAI_API_KEY`          |
+| `xai`        | `xai-oauth` (preferred) or `XAI_API_KEY` |
 | `zai`        | `ZAI_API_KEY`          |
 | `exa`        | `EXA_API_KEY` (or mcp) |
 | `tinyfish`   | `TINYFISH_API_KEY`     |

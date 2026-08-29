@@ -43,6 +43,7 @@
 ## Limits & Caps
 - Availability requires `memory.backend = "mnemopi"`; Hindsight and local memory backends do not expose this tool.
 - `id` must come from `recall`; the tool does not search by content.
+- Before `update`, read `memory://<id>` to fetch the full row first. Recall results are clipped previews (trailing `…`, `full_length` = original size), and `update` replaces content wholesale, so writing the preview back would silently drop the unseen tail.
 - `update` with neither `content` nor `importance` is rejected before any backend write.
 
 ## Errors

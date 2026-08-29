@@ -102,8 +102,8 @@ No match -> throws error (`Session "..." not found.`).
 Handled after initial session-manager construction:
 
 1. list local sessions with `SessionManager.list(cwd, parsed.sessionDir)`
-2. if empty: preload `SessionManager.listAll()` and open the picker in all-projects scope; print `No sessions found` and exit early only when the global list is also empty
-3. open TUI picker (`selectSession`, with optional preloaded `allSessions`/`startInAllScope`)
+2. if empty: probe globally with `SessionManager.listAll()` — solely so `No sessions found` can exit early when there are no sessions at all, and so the all-projects list is preloaded for an instant Tab switch; the picker itself never auto-switches into all-projects scope (issue #3099)
+3. open TUI picker (`selectSession`, with optional preloaded `allSessions`)
 4. if canceled: print `No session selected` and exit early
 5. if selected: when the session belongs to another project, switch the process into that project's directory (`setProjectDir`, cache resets, settings reload) first; then `SessionManager.open(selected.path)`
 
@@ -115,7 +115,7 @@ Uses `SessionManager.continueRecent(...)` directly (breadcrumb-first behavior ab
 
 ## CLI picker (`src/cli/session-picker.ts`)
 
-`selectSession(sessions, { allSessions?, startInAllScope? })` creates a standalone TUI with `SessionSelectorComponent` and resolves exactly once:
+`selectSession(sessions, { allSessions? })` creates a standalone TUI presenting `SessionSelectorComponent` as a fullscreen overlay on the terminal's alternate screen (mouse wheel scroll + click-to-resume) and resolves exactly once:
 
 - selection -> resolves selected `SessionInfo` (caller uses `.path` / `.cwd`)
 - cancel (Esc) -> resolves `null`
@@ -127,12 +127,12 @@ Uses `SessionManager.continueRecent(...)` directly (breadcrumb-first behavior ab
 
 Flow:
 
-1. fetch sessions from current session dir via `SessionManager.list(currentCwd, currentSessionDir)`; if empty, preload `SessionManager.listAll()` and open in all-projects scope
-2. mount `SessionSelectorComponent` in editor area using `showSelector(...)`, wired with `loadAllSessions: () => SessionManager.listAll()` and a `history.db` prompt matcher
+1. fetch sessions from current session dir via `SessionManager.list(currentCwd, currentSessionDir)`; always opens in current-folder scope — the all-projects list is never pre-probed here, and the empty state invites Tab instead (issue #3099)
+2. present `SessionSelectorComponent` as a fullscreen alternate-screen overlay via `ctx.ui.showOverlay` (anchored top-left at full size, mouse wheel scroll + click-to-resume; the transcript underneath is untouched), wired with `loadAllSessions: () => SessionManager.listAll()` and a `history.db` prompt matcher
 3. callbacks:
-   - select -> close selector and call `handleResumeSession(sessionPath)`
-   - cancel -> restore editor and rerender
-   - exit -> `ctx.shutdown()`
+   - select -> hide overlay and call `handleResumeSession(sessionPath)`
+   - cancel -> hide overlay, restore editor focus, rerender
+   - exit -> hide overlay, then `ctx.shutdown()`
 
 ## Session selector component behavior
 
@@ -226,7 +226,7 @@ So visible conversation/todo state is rebuilt from the new session file.
 
 ### Empty list paths
 
-- CLI `--resume` (no value): empty list prints `No sessions found` and exits.
+- CLI `--resume` (no value): empty current-folder list probes the global list; `No sessions found` is printed and the process exits only when the global list is also empty — otherwise the picker opens in current-folder scope with the empty-state hint.
 - Interactive selector: empty list renders message and remains cancellable.
 
 ### Missing/invalid target session file

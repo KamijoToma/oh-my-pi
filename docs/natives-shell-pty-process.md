@@ -6,6 +6,7 @@ This document covers execution/process/terminal primitives in `@oh-my-pi/pi-nati
 
 - `crates/pi-natives/src/shell.rs`
 - `crates/pi-shell/src/shell.rs`
+- `crates/pi-shell/src/coreutils.rs`
 - `crates/pi-shell/src/fixup.rs`
 - `crates/pi-shell/src/windows.rs` (Windows-only PATH enrichment)
 - `crates/pi-shell/src/process.rs`
@@ -31,7 +32,7 @@ Shell execution modes:
 1. **One-shot** via `executeShell(options, onChunk?)`.
 2. **Persistent session** via `new Shell(options?)` then `shell.run(...)` repeatedly.
 
-Both stream merged stdout/stderr text through a threadsafe callback and return `{ exitCode?, cancelled, timedOut, minimized? }`.
+Both stream merged stdout/stderr text through a threadsafe callback and return `{ exitCode?, cancelled, timedOut, minimized?, workingDir? }`. `workingDir` (added 16.3.0) carries the shell working directory after command completion so hosts can synchronize their session cwd without executing a hidden probe command.
 
 Related synchronous helper:
 
@@ -47,6 +48,7 @@ Rust creates `brush_core::Shell` with:
 - profile and rc loading skipped,
 - bash-mode builtins, with `exec` and `suspend` disabled,
 - native `sleep`, `timeout`, and `nohup` builtins registered,
+- in-process uutils-backed builtins registered (see next section),
 - skip-list for shell-sensitive vars (`PS1`, `PWD`, `SHLVL`, bash function exports, etc.),
 - a non-exported `env="$env"` fallback so PowerShell-style `$env:NAME` survives brush parameter expansion unless the user shadows `env`.
 
@@ -57,6 +59,16 @@ Session env behavior:
 - `PATH` is merged specially on Windows with case-insensitive dedupe.
 - Windows-only path enrichment (`pi-shell/src/windows.rs`) appends discovered Git-for-Windows paths when present and not already included.
 - `snapshotPath`, when present, is sourced during session creation with stdout/stderr/stdin wired to null files.
+
+### In-process uutils builtins
+
+Since 16.1.23 (2026-06-26), session creation also registers 12 in-process [uutils](https://github.com/uutils/coreutils)-backed builtins: `cat`, `head`, `tail`, `wc`, `sort`, `uniq`, `ls`, `find`, `grep`, `mkdir`, `rm`, and `mv`. They are implemented in `crates/pi-shell/src/coreutils.rs` on top of vendored, patched `uu-*` crates under `crates/vendor/` — `grep` on the ripgrep-based `pi_uu_grep`, `find` on `uutils/findutils`, the rest pinned to uutils/coreutils 0.8.0 (matching the bundled `uucore`). The same gated block additionally registers `rg` (a sibling builtin with ripgrep defaults, implemented as `pi_uu_grep::run_rg` — a separate entry point from the `grep` builtin) and the `fd` builtin (`crates/pi-shell/src/fd.rs`).
+
+Each builtin runs inside the shell process (no `fork`/`exec`) under a `pi_uutils_ctx` scope: stdio routes through the command's (possibly piped/redirected) file descriptors, path operands resolve against the shell working directory, the shell's exported environment is visible, and abort/timeout cancellation is honored (a blocked `stdin` read unwinds cleanly). Because these builtins shadow system binaries, registration is gated via `crates/pi-shell/src/shell.rs`:
+
+- `PI_DISABLE_UUTILS_BUILTINS` disables the whole set (bare names resolve to system binaries again),
+- `PI_DISABLE_UUTILS_DESTRUCTIVE` disables the destructive `rm`/`mv` shadows together,
+- `PI_DISABLE_RM_BUILTIN` / `PI_DISABLE_MV_BUILTIN` disable `rm`/`mv` individually.
 
 ### Runtime lifecycle and state transitions
 

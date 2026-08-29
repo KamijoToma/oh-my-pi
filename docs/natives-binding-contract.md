@@ -61,7 +61,7 @@ Consumers in `packages/coding-agent` and `packages/tui` import directly from `@o
 | Grep              | `hasMatch(content, pattern, ignoreCase?, multiline?)`                                                     | `grep.rs`                                        | `boolean`                  |
 | Fuzzy path search | `fuzzyFind(options)`                                                                                      | `fd.rs`                                          | `Promise<FuzzyFindResult>` |
 | Glob/workspace    | `glob(options, onMatch?)`, `listWorkspace(options)`                                                       | `glob.rs`, `workspace.rs`                        | `Promise<...>`             |
-| Glob cache        | `invalidateFsScanCache(path?)`                                                                            | `fs_cache.rs`                                    | `void`                     |
+| Glob cache        | `invalidateFsScanCache(path?)`                                                                            | `iofs.rs` (cache in `pi-walker`)                 | `void`                     |
 | AST/block/summary | `astGrep(options)`, `astMatch(options)`, `astEdit(options)`, `blockRangeAt(options)`, `enclosingBlockBoundaries(options)`, `summarizeCode(options)` | `ast.rs`, `block.rs`, `summary.rs`               | mixed                      |
 | Shell             | `executeShell(options, onChunk?)`                                                                         | `shell.rs`                                       | `Promise<ShellRunResult>`  |
 | Shell             | `new Shell(options?)`, `shell.run(...)`, `shell.abort()`                                                  | `shell.rs`                                       | class / promises           |
@@ -73,10 +73,16 @@ Consumers in `packages/coding-agent` and `packages/tui` import directly from `@o
 | Highlight         | `highlightCode`, `supportsLanguage`, `getSupportedLanguages`                                              | `highlight.rs`                                   | sync                       |
 | HTML              | `htmlToMarkdown(html, options?)`                                                                          | `html.rs`                                        | `Promise<string>`          |
 | SIXEL             | `encodeSixel`                                                                                             | `sixel.rs`                                       | sync                       |
-| Snapcompact       | `renderSnapcompactPng(text, options)`                                                                     | `snapcompact.rs`                                 | sync                       |
+| Snapcompact       | `renderSnapcompactPng(text, options)`, `snapcompactSupportedChars(font, chars)`                           | `snapcompact.rs`                                 | sync                       |
 | Clipboard         | `copyToClipboard`, `readImageFromClipboard`                                                               | `clipboard.rs`                                   | sync / promise             |
 | Tokens            | `countTokens(input, encoding?)`                                                                           | `tokens.rs`                                      | sync                       |
 | System/isolation  | `detectMacOSAppearance`, `MacAppearanceObserver`, `MacOSPowerAssertion`, `getWorkProfile`, `iso*` helpers | `appearance.rs`, `power.rs`, `prof.rs`, `iso.rs` | mixed                      |
+
+Newer surface members on existing exports (all present in `native/index.d.ts`):
+
+- `ShellRunResult.workingDir?` — shell working directory after command completion (added 16.3.0), letting hosts sync cwd without a hidden probe command.
+- `GrepOptions.maxCountPerFile?` — per-file content-mode match cap (added 15.10.11). Note `GrepOptions` has no `cache` field; directory grep is always uncached.
+- `snapcompactSupportedChars(font, chars)` — font glyph-capability probe (added 16.2.7).
 
 ## Sync vs async contract differences
 

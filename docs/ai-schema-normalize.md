@@ -31,6 +31,11 @@ All exports live under `@oh-my-pi/pi-ai/utils/schema`:
   upgrades draft-07 inputs to 2020-12 and wraps `tryEnforceStrictSchema` for
   provider call sites. `./adapt` also exports the `NO_STRICT` global-bypass
   flag (env `PI_NO_STRICT`) honored by every provider that emits `strict: true`.
+- `normalizeSchemaForMoonshot(value)` — Moonshot/Kimi MFJS subset for
+  `openai-completions` requests whose resolved compat sets
+  `toolSchemaFlavor: "moonshot-mfjs"`.
+- `sanitizeSchemaForOllama(schema)` — Ollama/Ollama Cloud Go tool-parser
+  compatibility pass applied to tool parameters before serialization.
 
 Removed in the unified-flow refactor:
 
@@ -52,10 +57,19 @@ Removed in the unified-flow refactor:
 | Cloud Code Assist Claude (Antigravity + GCA, `claude-*` model ids) | `normalizeSchemaForCCA`                     |
 | MCP `inputSchema` ingestion                                        | `normalizeSchemaForMCP`                     |
 | `anthropic-messages` (native, not CCA)                             | per-provider whitelist in `anthropic.ts`    |
+| Moonshot/Kimi MFJS hosts (`openai-completions`, `toolSchemaFlavor: "moonshot-mfjs"`) | `normalizeSchemaForMoonshot` |
+| `ollama` / `ollama-cloud` tool parameters                          | `toolWireSchema` → `sanitizeSchemaForOllama` |
 
 Gemini CLI / Antigravity CCA MUST run the full `normalizeSchemaForCCA`
 pipeline (not just the first keyword-stripping pass) to keep parity with the
 shared Google Claude path.
+
+The Ollama pass rewrites forms its Go `/api/chat` tool parser cannot
+unmarshal: boolean subschemas (`true`/`false`) widen into an `anyOf` union of
+every primitive JSON type (so grammar-constrained samplers still see "any
+value" instead of an empty object), boolean `additionalProperties` /
+`unevaluatedProperties` keys are stripped, and nullable `type` arrays flatten
+to a single type or per-type alternatives.
 
 ## Walk semantics
 
@@ -140,7 +154,7 @@ so callers MUST emit `strict: true` only when enforcement actually succeeded.
 `resolveProviderModels` in `packages/catalog/src/model-manager.ts` and
 `readModelCache`/`writeModelCache` in `packages/catalog/src/model-cache.ts`
 cooperate via a `static_fingerprint` column on the `model_cache` SQLite
-table (current cache schema version 6).
+table (current cache schema version 8).
 
 - `fingerprintStatic(staticModels)` hashes the static catalog slice
   (`Bun.hash(JSON.stringify(models))` in base36) and memoizes the result

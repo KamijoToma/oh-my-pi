@@ -10,7 +10,7 @@ Four similarly named things behave differently. Keep them straight:
 
 - **Context files** are read as plain Markdown and shown to the agent inside a `<context>` block. They are advisory background that stays in the session's opening context.
 - **Sticky rules** come from a top-level `RULES.md`. They are converted into an always-apply rule that is re-attached near the current turn, so they keep their hold even after the visible conversation grows. See "Sticky rules vs normal context" below.
-- **Discovery providers** are the config-source adapters (`native`, `claude`, `codex`, `gemini`, `opencode`, `github`, `agents`, `agents-md`) that know where each tool keeps its files. The same provider that contributes context files may also contribute MCP servers, slash commands, skills, hooks, tools, prompts, and settings.
+- **Discovery providers** are the config-source adapters that know where each tool keeps its files. The full registry is `native`, `omp-plugins`, `claude`, `codex`, `agents`, `claude-plugins`, `gemini`, `opencode`, `cursor`, `windsurf`, `cline`, `github`, `vscode`, `agents-md`, `mcp-json`, `ssh-json`, and `builtin-defaults`. Only some contribute context files (`native`, `claude`, `codex`, `gemini`, `opencode`, `github`, `agents`, `agents-md`); the rest contribute other capabilities such as rules, MCP servers, skills, commands, hooks, tools, or SSH hosts. The same provider that contributes context files may also contribute MCP servers, slash commands, skills, hooks, tools, prompts, and settings.
 - **Model providers** are inference backends such as `anthropic`, `openai`, `google`, `groq`, `ollama`, and `openrouter`. They have nothing to do with context files except that both kinds of id share the one `disabledProviders` list — see "Disabling discovery providers" below and [Providers](./providers.md).
 
 Authoring **skills** and **rule** files (as opposed to the sticky `RULES.md`) is covered in [Skills](./skills.md). Customizing the system prompt with `SYSTEM.md` is covered in [System prompt customization](./system-prompt-customization.md).
@@ -69,6 +69,8 @@ Put broad, durable project background in `AGENTS.md`. Reserve `RULES.md` for sho
 | `github` | `.github/instructions/**/*.instructions.md` | Project rules | GitHub Copilot / VS Code instruction files become rules. `applyTo: '*'` or `applyTo: '**'` is injected as always-apply context; other `applyTo` globs are listed in the rulebook with `description` and are readable as `rule://<name>`. |
 
 Providers marked "(no ancestor walk-up)" only look in the current working directory's config directory. If you need ancestor walk-up behavior, prefer the native `.omp/AGENTS.md` format or a standalone `AGENTS.md` (the `agents-md` provider), or launch `omp` from the directory that holds the config directory.
+
+The discovery registry also holds providers that contribute no context files at all: `cursor` (`.cursor/rules/*.mdc` and legacy `.cursorrules` rules, plus MCP servers and settings), `windsurf` (Windsurf rules and MCP servers), `cline` (`.clinerules` rules), `vscode` and `mcp-json` (MCP servers), `claude-plugins` (Claude marketplace plugins: skills, commands, hooks, tools, MCP servers), `omp-plugins` (OMP plugins: skills, commands, rules, prompts, hooks, tools, MCP servers), `ssh-json` (SSH hosts), and `builtin-defaults` (built-in default rules). These become relevant for rules and other capabilities, and for the shared `disabledProviders` switch below.
 
 ## Load order and shadowing
 
@@ -189,7 +191,7 @@ disabledProviders:
 
 | Id kind | Examples | Effect when listed |
 |---|---|---|
-| Discovery provider ids | `native`, `claude`, `codex`, `gemini`, `opencode`, `github`, `agents`, `agents-md` | The entire config source is removed — not just its context files, but also any MCP servers, slash commands, skills, hooks, tools, prompts, and settings it would have contributed. |
+| Discovery provider ids | `native`, `omp-plugins`, `claude`, `codex`, `agents`, `claude-plugins`, `gemini`, `opencode`, `cursor`, `windsurf`, `cline`, `github`, `vscode`, `agents-md`, `mcp-json`, `ssh-json`, `builtin-defaults` | The entire config source is removed — not just its context files, but also any rules, MCP servers, slash commands, skills, hooks, tools, prompts, settings, or SSH hosts it would have contributed. |
 | Model provider ids | `anthropic`, `openai`, `google`, `groq`, `ollama`, `openrouter` | The model backend is removed from selection even when its credentials are present. See [Providers](./providers.md). |
 
 Ids are exact and the two namespaces do not collide by accident: `google` disables the Google model backend, while `gemini` disables the Gemini CLI discovery files. Disabling a discovery provider is heavier than it looks — disabling `claude`, for instance, also drops Claude-discovered MCP servers, commands, skills, hooks, tools, and settings, not only `CLAUDE.md`.

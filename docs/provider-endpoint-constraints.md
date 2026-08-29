@@ -189,7 +189,6 @@ Reasoning fields are not interchangeable.
 - Uses `reasoning: { effort, summary }`.
 - Can include `reasoning.encrypted_content` for replay.
 - xAI Grok models may require omitting `reasoning.effort`.
-- Some compat paths inject the GPT-5 `# Juice: 0 !important` developer scaffold.
 
 ### OpenRouter `reasoning`
 

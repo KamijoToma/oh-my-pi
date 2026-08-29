@@ -64,6 +64,7 @@ This only controls the startup splash animation. It does not rerun setup or chan
 | `omp config set <key> <value>` | Parse `<value>` against the key's schema type and write it to the global `config.yml`. |
 | `omp config reset <key>` | Write the key's schema **default** back to the global config (this persists the default, it does not delete the key). |
 | `omp config path` | Print the active agent directory (honors `PI_CODING_AGENT_DIR`). |
+| `omp config init-xdg` | Create the XDG base directories omp uses (`$XDG_DATA_HOME/omp`, `$XDG_STATE_HOME/omp`, `$XDG_CACHE_HOME/omp`; Linux/macOS only). |
 
 `omp config` with no subcommand, or `--help`, prints the help and lists settings. The `--json` flag is accepted by `list`, `get`, `set`, and `reset`.
 
@@ -524,7 +525,7 @@ memory:
 | `compaction.strategy` | enum | `snapcompact` | `context-full`, `handoff`, `shake`, `snapcompact`, `off`. |
 | `compaction.thresholdPercent` | number | `-1` | Percent-of-context trigger; `-1` = reserve-based default. |
 | `compaction.thresholdTokens` | number | `-1` | Fixed token trigger when `> 0`. |
-| `compaction.reserveTokens` | number | `16384` | Tokens reserved for the next turn. |
+| `compaction.reserveTokens` | number | _(unset)_ | Tokens reserved for the next turn. Unset means the compaction layer picks the reserve (16384 as a fallback, or a proportional reserve on small-context windows). |
 | `compaction.keepRecentTokens` | number | `20000` | Recent tokens always preserved. |
 | `compaction.remoteEnabled` | boolean | `true` | Allow remote compaction service. |
 | `compaction.autoContinue` | boolean | `true` | Continue automatically after compaction. |
@@ -621,7 +622,8 @@ searxng:
 
 | Key | Type | Default | Values / notes |
 |---|---|---|---|
-| `providers.webSearch` | enum | `auto` | `auto` plus the configured search providers (`perplexity`, `gemini`, `anthropic`, `codex`, `zai`, `exa`, `jina`, `kagi`, `tavily`, `brave`, `kimi`, `parallel`, `synthetic`, `searxng`). |
+| `providers.webSearch` | enum | `auto` | `auto` plus the configured search providers (`perplexity`, `gemini`, `anthropic`, `codex`, `xai`, `zai`, `exa`, `tinyfish`, `jina`, `kagi`, `tavily`, `firecrawl`, `brave`, `kimi`, `parallel`, `synthetic`, `searxng`, `duckduckgo`). |
+| `providers.webSearchExclude` | array | `[]` | Search provider ids that `web_search` must never use, even as fallbacks. |
 | `providers.webSearchGeminiModel` | string | _(unset)_ | Gemini model ID for Google Search grounding when `web_search` uses Gemini; defaults to `gemini-2.5-flash`, overridden by `GEMINI_SEARCH_MODEL`. |
 | `providers.image` | enum | `auto` | `auto`, `openai`, `antigravity`, `xai`, `gemini`, `openrouter`. |
 | `providers.fetch` | enum | `auto` | `auto`, `native`, `trafilatura`, `lynx`, `parallel`, `jina`. |
@@ -631,6 +633,8 @@ searxng:
 | `providers.openaiWebsockets` | enum | `auto` | `auto`, `off`, `on`. |
 | `providers.openrouterVariant` | enum | `default` | `default`, `nitro`, `floor`, `online`, `exacto`. |
 | `providers.kimiApiFormat` | enum | `anthropic` | `openai`, `anthropic`. |
+| `providers.maxInFlightRequests` | record | `{}` | Max concurrent LLM requests per provider id (e.g. `openai`, `anthropic`), shared across local OMP processes with this config root; omitted providers are unlimited. |
+| `providers.anthropic.serverSideFallback` | boolean | `false` | When a Claude Fable 5 / Mythos 5 request is blocked by Anthropic's safety classifier, retry it on Claude Opus 4.8 server-side. |
 | `provider.appendOnlyContext` | enum | `auto` | `auto`, `on`, `off`. |
 | `exa.enabled` | boolean | `true` | Enable Exa integration. |
 | `exa.enableSearch` | boolean | `true` | Exa search. |
@@ -645,7 +649,7 @@ Provider credentials and custom model definitions are configured separately — 
 
 ### Other groups
 
-`omp config list` exposes many more grouped settings, including: `task.*` (subagent concurrency, isolation, model overrides), `skills.*` and `commands.*` (discovery toggles), `mcp.*`, `github.*`, `async.*`, `goal.*`, `loop.*`, `todo.*`, `magicKeywords.*`, `ttsr.*` (time-traveling stream rules), `display.*`, `startup.*`, `share.*`, `collab.*`, `stt.*`/`tts.*`, `memories.*`/`hindsight.*`/`mnemopi.*` (memory backends), and `bashInterceptor.*`. Each follows the same type/default rules shown above.
+`omp config list` exposes many more grouped settings, including: `task.*` (subagent concurrency, isolation, model overrides, `task.softRequestBudgetNotice` steering notice when a subagent crosses its soft request budget), `skills.*` and `commands.*` (discovery toggles), `mcp.*`, `github.*`, `async.*`, `goal.*`, `loop.*`, `todo.*`, `magicKeywords.*`, `ttsr.*` (time-traveling stream rules), `display.*`, `startup.*`, `share.*`, `collab.*`, `stt.*`/`tts.*`, `memories.*`/`hindsight.*`/`mnemopi.*` (memory backends), and `bashInterceptor.*`. Each follows the same type/default rules shown above.
 
 ## Legacy migration
 

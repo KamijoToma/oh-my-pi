@@ -151,9 +151,14 @@ If `skills.enableSkillCommands` is true, interactive mode registers one slash co
 - delivery mode follows the **submission keybinding**:
   - **Enter** → invokes the skill on the `steer` queue while streaming (matches free-text Enter, which also steers), or as a normal idle prompt when the agent is not streaming
   - **Ctrl+Enter** (`app.message.followUp`) → invokes the skill on the `followUp` queue while streaming, or as a normal idle prompt when the agent is not streaming
-- appends metadata (`Skill: <path>`, optional `User: <args>`)
+- appends invocation metadata (see the identification/tagging formats below)
 
-There is no flag, mode-selector, or frontmatter knob to override this — the keybinding _is_ the choice, identical to how free text is routed during streaming (`input-controller.ts:562-568` for Enter, `input-controller.ts:961-966` for Ctrl+Enter; both dispatch through `#invokeSkillCommand`).
+There is no flag, mode-selector, or frontmatter knob to override this — the keybinding _is_ the choice, identical to how free text is routed during streaming. Both submission paths dispatch through `#invokeSkillCommand` in `input-controller.ts`, which delegates to `invokeSkillCommandFromText` in `src/modes/skill-command.ts`.
+
+Invoked skill content is identified by invocation kind, each with its own prompt template (in `src/prompts/skills/`):
+
+- **User-invoked** (`user-invocation.md`, used by `/skill:<name>`): the message opens by announcing that the user invoked the skill, embeds the skill body, and appends the skill directory (`[Skill directory: <baseDir>]`) with instructions to resolve the skill's relative paths (scripts, templates) against it, plus optional `User: <args>`.
+- **Autoloaded** (`autoload.md`): a minimal provenance-only format — body followed by `Skill: <path>` and optional `User: <args>` — used when subagents auto-inject skills declared via the `autoloadSkills` agent frontmatter field; these hidden messages must not claim the user invoked them.
 
 ## `skill://` URL behavior
 

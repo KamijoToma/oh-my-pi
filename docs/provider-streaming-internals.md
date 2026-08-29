@@ -5,7 +5,7 @@ This document explains how token/tool streaming is normalized in `@oh-my-pi/pi-a
 ## End-to-end flow
 
 1. `streamSimple()` (`packages/ai/src/stream.ts`) maps generic options and dispatches to a provider stream function.
-2. Provider stream functions translate provider-native stream events into the unified `AssistantMessageEvent` sequence. Current built-ins include Anthropic, OpenAI Responses/Completions/Codex/Azure Responses, Google Gemini/Gemini CLI/Vertex, Bedrock Converse, Ollama, Cursor, pi-native gateway transport, plus GitLab Duo/Kimi/Synthetic/xAI-Grok-Responses wrappers and extension-registered custom APIs.
+2. Provider stream functions translate provider-native stream events into the unified `AssistantMessageEvent` sequence. Current built-ins include Anthropic, OpenAI Responses/Completions/Codex/Azure Responses, Google Gemini/Gemini CLI/Vertex, Bedrock Converse, Ollama, Cursor, pi-native gateway transport, plus GitLab Duo, GitLab Duo Workflow, Devin, Kimi, and Synthetic wrappers, and extension-registered custom APIs. (xAI Grok has no dedicated wrapper: `xai-oauth` models are catalog specs with `api: "openai-responses"` riding the shared OpenAI Responses path with catalog-level compat, while API-key `xai` models use `api: "openai-completions"`.)
 3. Each provider pushes events into `AssistantMessageEventStream` (`packages/ai/src/utils/event-stream.ts`), which exposes:
    - async iteration for incremental updates
    - `result()` for final `AssistantMessage`
@@ -32,7 +32,7 @@ All providers emit the same shape (`AssistantMessageEvent` in `packages/ai/src/t
 
 ## Delta throttling behavior
 
-`AssistantMessageEventStream` itself no longer throttles or merges delta events — every provider event is delivered as pushed. The per-delta cost control moved into tool-call argument parsing: providers accumulate partial JSON and re-parse it via `parseStreamingJsonThrottled()` (`packages/ai/src/utils/json-parse.ts`), which skips the re-parse until at least `STREAMING_JSON_PARSE_MIN_GROWTH` (256) new bytes have arrived, bounding mid-stream parse cost from quadratic to linear. The final `toolcall_end` parse is always unconditional and authoritative.
+`AssistantMessageEventStream` itself no longer throttles or merges delta events — every provider event is delivered as pushed. The per-delta cost control moved into tool-call argument parsing: providers accumulate partial JSON and re-parse it via `parseStreamingJsonThrottled()` (`packages/utils/src/json-parse.ts`), which skips the re-parse until at least `STREAMING_JSON_PARSE_MIN_GROWTH` (256) new bytes have arrived, bounding mid-stream parse cost from quadratic to linear. The final `toolcall_end` parse is always unconditional and authoritative.
 
 There is no provider backpressure: providers still produce at full speed, while the local stream queues.
 
@@ -101,7 +101,7 @@ Tool-call argument streaming:
 
 ## Partial tool-call JSON accumulation and recovery
 
-Shared behavior for Anthropic/OpenAI Responses uses `parseStreamingJson()` / `parseStreamingJsonThrottled()` (`packages/ai/src/utils/json-parse.ts`):
+Shared behavior for Anthropic/OpenAI Responses uses `parseStreamingJson()` / `parseStreamingJsonThrottled()` (`packages/utils/src/json-parse.ts`):
 
 1. try `JSON.parse`
 2. fallback to the in-house `RelaxedJson` parser (relaxed/repairing) for incomplete fragments
@@ -206,7 +206,7 @@ Provider-specific (not fully abstracted):
 
 - [`../../ai/src/stream.ts`](../packages/ai/src/stream.ts) — provider dispatch, option mapping, API key/session plumbing, custom API dispatch, and provider-specific credential handling.
 - [`../../ai/src/utils/event-stream.ts`](../packages/ai/src/utils/event-stream.ts) — generic stream queue + final-result resolution.
-- [`../../ai/src/utils/json-parse.ts`](../packages/ai/src/utils/json-parse.ts) — partial JSON parsing for streamed tool arguments.
+- [`../../utils/src/json-parse.ts`](../packages/utils/src/json-parse.ts) — partial JSON parsing for streamed tool arguments.
 - [`../../ai/src/providers/anthropic.ts`](../packages/ai/src/providers/anthropic.ts) — Anthropic event translation and tool JSON delta accumulation.
 - [`../../ai/src/providers/openai-responses.ts`](../packages/ai/src/providers/openai-responses.ts), [`openai-shared.ts`](../packages/ai/src/providers/openai-shared.ts), [`openai-codex-responses.ts`](../packages/ai/src/providers/openai-codex-responses.ts), [`azure-openai-responses.ts`](../packages/ai/src/providers/azure-openai-responses.ts) — Responses-family event translation and status mapping.
 - [`../../ai/src/providers/google.ts`](../packages/ai/src/providers/google.ts), [`google-gemini-cli.ts`](../packages/ai/src/providers/google-gemini-cli.ts), [`google-vertex.ts`](../packages/ai/src/providers/google-vertex.ts) — Gemini stream chunk-to-block translation variants.

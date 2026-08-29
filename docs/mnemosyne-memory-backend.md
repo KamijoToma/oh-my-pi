@@ -40,6 +40,7 @@ Recalled memory is background context, not instructions. Current user messages a
 | `mnemopi.autoRetain`          | `true`                 | Retain completed turns automatically.                                                                                                                                   |
 | `mnemopi.polyphonicRecall`    | `false`                | Enable 4-voice polyphonic recall (vector, graph, fact, temporal) with reciprocal rank fusion; `MNEMOPI_POLYPHONIC_RECALL` overrides when set.                            |
 | `mnemopi.enhancedRecall`      | `false`                | Enable the tiered query result cache for repeated/similar recall queries; `MNEMOPI_ENHANCED_RECALL` overrides when set.                                                  |
+| `mnemopi.proactiveLinking`    | `false`                | Ingest new memories into the episodic graph as they are stored, linking them to related entities and memories; `MNEMOPI_PROACTIVE_LINKING` overrides when set.           |
 | `mnemopi.retainEveryNTurns`   | `4`                    | Minimum user turns between automatic retain writes.                                                                                                                     |
 | `mnemopi.recallLimit`         | `8`                    | Maximum recalled memories in the prompt block.                                                                                                                          |
 | `mnemopi.recallContextTurns`  | `3`                    | Prior user-bounded turns included in recall queries.                                                                                                                    |
@@ -65,6 +66,14 @@ The coding-agent wrapper applies scoping on top of the underlying `Mnemopi` pack
 - `per-project-tagged` writes to the project-local bank and recalls from both the project-local bank and the shared global bank, with duplicate recall results merged.
 
 The combined project-plus-global behavior lives in the wrapper. The `@oh-my-pi/pi-mnemopi` package itself still exposes banks and constructor options directly, including `bank` for selecting a bank name. Project-local banks other than the shared bank are stored as sibling bank databases managed by Mnemopi's `BankManager`.
+
+## Recall previews and full-row reads
+
+Recall results carry clipped content previews, not full rows. Content longer than the preview cap is truncated with a trailing `…`; the result also sets `truncated: true` and `full_length` (original character count), so callers can detect clipping without parsing the marker. The cap is `RecallOptions.contentPreviewChars` (default `500`; `0` disables clipping).
+
+The full row is always reachable by reading `memory://<memory-id>`, which resolves the live working or episodic row and returns its full content behind a small YAML frontmatter header (`id`, `bank`, `store`, `memory_type`, timestamps, `importance`, `veracity`, `session_id`, `metadata`). The coding-agent's model-facing prompts require this read before any `memory_edit update`, since `update` replaces content wholesale and would otherwise discard the unseen tail of a clipped preview.
+
+Retention writes a marker-free transcript projection: when the host supplies an `embedText` override alongside the stored transcript, that projection is used for embedding, working-memory FTS indexing (`COALESCE(embed_text, content)`), and rebuild-reembedding, so retention protocol markers in the stored transcript do not pollute vector and full-text recall.
 
 ## LLM and embeddings
 

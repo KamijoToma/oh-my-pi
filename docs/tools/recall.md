@@ -35,6 +35,8 @@ Hindsight bullet format comes from `formatMemories(...)`:
 Mnemopi bullet format comes from `formatScopedRecallWithIds(...)`:
 - each bullet is `- <content> (id: <id>|id unavailable) [<source>] (<YYYY-MM-DD>) c:<score>`; optional source, date, and score suffixes appear only when present.
 
+Mnemopi `<content>` is a preview, not the full row. Content longer than the recall preview cap is clipped with a trailing `…`; the result also carries `truncated: true` and `full_length` (original character count). The cap is mnemopi's `RecallOptions.contentPreviewChars` (default 500 characters; `0` disables clipping) — the explicit tool path uses the default. Read `memory://<id>` to fetch the full row.
+
 When no matches exist:
 - `content[0].text = "No relevant memories found."`
 - `details = {}`
@@ -100,4 +102,5 @@ When no matches exist:
 - Shared backend details are in `docs/tools/retain.md`: storage, subagent aliasing, bank scoping, mission setup, and mental-model behavior.
 - Hindsight mental models are not fetched by this tool. They may already be present in the agent's developer instructions because the backend caches a `<mental_models>` block separately from recall results.
 - Mnemopi developer instructions may include a `<memories>` block from auto-recall; this explicit tool does not update that block.
+- Mnemopi previews ending in `…` are clipped (`truncated: true`; `full_length` gives the original size). Always `read memory://<id>` to fetch the full row before any `memory_edit update` — `update` replaces content wholesale, so overwriting the preview would delete the unseen tail.
 - The tool returns memory hits; it does not synthesize across them. Use `reflect` for that path.

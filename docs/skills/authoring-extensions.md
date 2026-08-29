@@ -158,7 +158,7 @@ pi.registerCommand("my-cmd", {
 
 ## Registering tools
 
-Tools are called by the LLM. Parameters use [Zod](https://zod.dev) schemas, available at `pi.zod`:
+Tools are called by the LLM. Parameters use [Zod](https://zod.dev) schemas, available at `pi.zod`. `pi.arktype` (the injected [arktype](https://arktype.io) module) is also available for authoring extension tools and is canonical going forward; `pi.typebox` remains as a zod-backed shim for legacy TypeBox-style schemas:
 
 ```ts
 const z = pi.zod;

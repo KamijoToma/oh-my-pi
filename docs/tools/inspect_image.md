@@ -16,7 +16,7 @@
 
 | Field | Type | Required | Description |
 | --- | --- | --- | --- |
-| `path` | `string` | Yes | Image path passed to `loadImageInput`; resolved relative to `session.cwd` by `resolveReadPath(...)`. |
+| `path` | `string` | Yes | Image file path, `Image #N` label, or `attachment://N` URI (`image://N` also accepted). File paths are passed to `loadImageInput` and resolved relative to `session.cwd` by `resolveReadPath(...)`; the two attachment-reference forms index the turn's image attachments (1-based). |
 | `question` | `string` | Yes | User prompt sent as a text content block alongside the image. |
 
 ## Outputs
@@ -42,21 +42,23 @@ TUI rendering adds presentation-only truncation from `packages/coding-agent/src/
 2. It reads `session.modelRegistry`; missing registry, empty registry, missing API key, or unresolved model each raise `ToolError` from `packages/coding-agent/src/tools/inspect-image.ts`.
 3. Model selection tries, in order, `pi/vision`, `pi/default`, the active model string from the session, then `availableModels[0]`. `expandRoleAlias(...)` and `resolveModelFromString(...)` handle each lookup.
 4. The chosen model must advertise `input.includes("image")`; otherwise execution fails before reading the file.
-5. `loadImageInput(...)` in `packages/coding-agent/src/utils/image-loading.ts` resolves the path with `resolveReadPath(...)`, detects MIME type with `readImageMetadata(...)`, and rejects files larger than `MAX_IMAGE_INPUT_BYTES` (`20 * 1024 * 1024`, 20 MiB) using `ImageInputTooLargeError`.
-6. `readImageMetadata(...)` in `packages/utils/src/mime.ts` inspects file headers only. Supported detected MIME types are `image/png`, `image/jpeg`, `image/gif`, and `image/webp`.
-7. `loadImageInput(...)` is called with `excludeWebP: webpExclusionForModel(model)` (`true` only for models that cannot decode WebP, e.g. the Ollama family). It calls `resizeImage(...)` when `images.autoResize` is true, or when `excludeWebP` is set and the detected type is `image/webp` — re-encoding away from WebP even with auto-resize off. The `excludeWebP` flag is forwarded into `resizeImage(...)`. Resize failures are swallowed there and the original bytes are kept.
-8. If MIME detection returned no supported image type, `execute(...)` throws `ToolError("inspect_image only supports PNG, JPEG, GIF, and WEBP files detected by file content.")`.
-9. The tool calls `instrumentedCompleteSimple(...)` with one user message containing two content parts in order:
+5. `parseImageAttachmentReference(...)` in `packages/coding-agent/src/tools/inspect-image.ts` checks whether `path` is an attachment reference: `Image #N` (optionally bracketed) or `attachment://N` / `image://N` (case-insensitive). On a match, the image is loaded from the turn's attachment list (`session.getImageAttachments()` via `loadImageAttachmentInput(...)`, 1-based indexing); an out-of-range index or an empty attachment list raises a `ToolError` listing the available attachments. Otherwise `path` is treated as a filesystem path.
+6. `loadImageInput(...)` in `packages/coding-agent/src/utils/image-loading.ts` resolves the path with `resolveReadPath(...)`, detects MIME type with `readImageMetadata(...)`, and rejects files larger than `MAX_IMAGE_INPUT_BYTES` (`20 * 1024 * 1024`, 20 MiB) using `ImageInputTooLargeError`.
+7. `readImageMetadata(...)` in `packages/utils/src/mime.ts` inspects file headers only. Supported detected MIME types are `image/png`, `image/jpeg`, `image/gif`, and `image/webp`.
+8. `loadImageInput(...)` is called with `excludeWebP: webpExclusionForModel(model)` (`true` only for models that cannot decode WebP, e.g. the Ollama family). It calls `resizeImage(...)` when `images.autoResize` is true, or when `excludeWebP` is set and the detected type is `image/webp` — re-encoding away from WebP even with auto-resize off. The `excludeWebP` flag is forwarded into `resizeImage(...)`. Resize failures are swallowed there and the original bytes are kept.
+9. If MIME detection returned no supported image type, `execute(...)` throws `ToolError("inspect_image only supports PNG, JPEG, GIF, and WEBP files detected by file content.")`.
+10. The tool calls `instrumentedCompleteSimple(...)` with one user message containing two content parts in order:
    - `{ type: "image", data: imageInput.data, mimeType: imageInput.mimeType }`
    - `{ type: "text", text: params.question }`
-10. `systemPrompt` is a one-element array rendered from `packages/coding-agent/src/prompts/tools/inspect-image-system.md`; telemetry is tagged with oneshot kind `inspect_image`.
-11. If the model response stop reason is `error` or `aborted`, the tool maps that to `ToolError`.
-12. `extractTextContent(...)` from `packages/coding-agent/src/commit/utils.ts` concatenates only `text` content blocks from the assistant message, trims the result, and the tool fails if nothing remains.
-13. Success returns the text plus `details`; `inspectImageToolRenderer` formats the result for the TUI.
+11. `systemPrompt` is a one-element array rendered from `packages/coding-agent/src/prompts/tools/inspect-image-system.md`; telemetry is tagged with oneshot kind `inspect_image`.
+12. If the model response stop reason is `error` or `aborted`, the tool maps that to `ToolError`.
+13. `extractTextContent(...)` from `packages/coding-agent/src/commit/utils.ts` concatenates only `text` content blocks from the assistant message, trims the result, and the tool fails if nothing remains.
+14. Success returns the text plus `details`; `inspectImageToolRenderer` formats the result for the TUI.
 
 ## Modes / Variants
 - **Original image path**: `images.autoResize` disabled. The original file bytes are base64-encoded and sent with the detected MIME type.
 - **Auto-resized path**: `images.autoResize` enabled. `resizeImage(...)` may downscale and re-encode the image before upload.
+- **Attachment reference path**: `path` is `Image #N`, `attachment://N`, or `image://N`. The image bytes come from the turn's image attachments instead of the filesystem; MIME gating and resize behavior match the file paths.
 - **Unsupported image path**: file exists but header sniffing does not identify PNG/JPEG/GIF/WEBP. The tool returns a `ToolError` before any model call.
 - **Oversize image path**: file size exceeds 20 MiB before upload. The tool returns a `ToolError` before any model call.
 
@@ -104,6 +106,8 @@ TUI rendering adds presentation-only truncation from `packages/coding-agent/src/
 - Input file:
   - `Image file too large: <size> exceeds <limit> limit.` from `ImageInputTooLargeError`, remapped to `ToolError`.
   - `inspect_image only supports PNG, JPEG, GIF, and WEBP files detected by file content.` when header sniffing fails.
+  - `No image attachments are available in this turn. path="<path>" must be a readable file path or attachment URI.` when an attachment reference is used but the turn has no image attachments.
+  - `Could not resolve image attachment '<path>'. Available image attachments: <label -> uri, ...>. Pass an attachment URI or a readable filesystem path.` when an attachment reference is out of range.
 - Model call:
   - `inspect_image request failed.` if the response stop reason is `error` without a provider message.
   - Provider `errorMessage` is passed through when present.

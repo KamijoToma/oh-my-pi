@@ -23,7 +23,7 @@ This document describes operator-visible behavior for session export/share/fork/
 | `/fork`                                 | Interactive slash command | Yes (active session identity changes) | Creates new session file and switches current session to it (persistent mode only) | Copies artifact directory to new session namespace when present |
 | `--fork <id\|path>`                     | CLI startup               | Yes after session creation            | Creates a new session fork from the selected source into current cwd/session dir   | None                                                            |
 | `/resume`                               | Interactive slash command | Yes (active in-memory state replaced) | Switches to selected existing session file                                         | None                                                            |
-| `--resume`                              | CLI startup picker        | Yes after session creation            | Opens selected existing session file                                               | None                                                            |
+| `--resume`                              | CLI startup picker        | Yes after session creation            | Opens selected existing session file (picker opens in current-folder scope; the global list is preloaded only for the empty-everything early exit and instant Tab switching)                                               | None                                                            |
 | `--resume <id\|path>`                   | CLI startup               | Yes after session creation            | Opens existing session; global cross-project match re-roots (moved dir) or forks into current project   | None                                                            |
 | `--continue`                            | CLI startup               | Yes after session creation            | Opens terminal breadcrumb (re-roots it if its dir was moved) or most-recent session; creates new one if none exists   | None                                                            |
 
@@ -207,7 +207,7 @@ Startup `--fork` is resolved before normal session creation:
 
 Flow:
 
-1. Opens session selector populated via `SessionManager.list(currentCwd, currentSessionDir)`. If the current folder has no sessions, `SessionManager.listAll()` is preloaded and the picker opens directly in all-projects scope.
+1. Opens session selector populated via `SessionManager.list(currentCwd, currentSessionDir)`. The picker always opens in current-folder scope; the empty-state hint (`No sessions in current folder. Press Tab to view all.`) invites Tab into all-projects instead of auto-switching (issue #3099).
 2. On selection, `SelectorController.handleResumeSession(sessionPath)` calls `session.switchSession(sessionPath)`.
 3. UI clears/rebuilds chat and todos, then reports `Resumed session` (or `Resumed session in <dir>` when the resumed session belongs to another project, in which case the process cwd and cwd-derived caches are re-pointed via `applyCwdChange`).
 
@@ -219,7 +219,7 @@ Notes:
 
 ### `--resume` (no value)
 
-- `main.ts` lists sessions for current cwd/sessionDir and opens picker. When the current folder is empty, it falls back to `SessionManager.listAll()` and opens the picker in all-projects scope; `No sessions found` is printed only when the global list is also empty.
+- `main.ts` lists sessions for current cwd/sessionDir and opens the picker in current-folder scope. When the current folder is empty, it probes `SessionManager.listAll()` solely for the empty-everything early exit (`No sessions found`) and preloads the global list so Tab switching is instant — the picker itself never auto-switches into all-projects scope (issue #3099).
 - Selected path is opened with `SessionManager.open(selectedPath)` before session creation. Selecting a session from another project first switches the process into that project's directory and reloads cwd-scoped settings/caches.
 
 ### `--resume <value>`

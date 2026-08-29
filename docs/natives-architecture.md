@@ -32,7 +32,7 @@ There is no current `packages/natives/src` TypeScript wrapper layer. Consumers i
 
 Current capability groups in the generated API include:
 
-- **Search/text/code primitives**: `grep`, `search`, `hasMatch`, `fuzzyFind`, `glob`, `astGrep`, `astEdit`, `blockRangeAt`, `summarizeCode`, text width/slicing/wrapping/sanitization, syntax highlighting, token counting.
+- **Search/text/code primitives**: `grep`, `search`, `hasMatch`, `fuzzyFind`, `glob`, `astGrep`, `astEdit`, `blockRangeAt`, `summarizeCode`, text width/slicing/wrapping, syntax highlighting, token counting.
 - **Execution/process/terminal primitives**: `executeShell`, `Shell`, `PtySession`, `Process`, key parsing, bash fixups.
 - **System/media/isolation/conversion primitives**: clipboard, SIXEL encoding, HTML-to-Markdown, macOS appearance/power helpers, work profiling, workspace scanning, isolation backend helpers (`iso*`).
 
@@ -109,12 +109,12 @@ Loader failures are explicit:
 - `clipboard`
 - `crash_handler`
 - `fd`
-- `fs_cache`
 - `glob`
 - `glob_util`
 - `grep`
 - `highlight`
 - `html`
+- `iofs` (walker filesystem DTOs and `invalidateFsScanCache`)
 - `iso`
 - `keys`
 - `language` (re-exported from `pi_ast`)
@@ -127,6 +127,7 @@ Loader failures are explicit:
 - `snapcompact`
 - `summary`
 - `task`
+- `testing` (crate-private, test-only helpers)
 - `text`
 - `tokens`
 - `utils` (crate-private helpers)
